@@ -1,0 +1,27 @@
+name = "inkrypt-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+workers_dev = false
+preview_urls = false
+
+[vars]
+RP_NAME = "Inkrypt"
+RP_ID = "notes.example.com"
+ORIGIN = "https://notes.example.com"
+CORS_ORIGIN = "https://notes.example.com"
+COOKIE_SAMESITE = "Lax"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "inkrypt"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiterDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RateLimiterDO"]

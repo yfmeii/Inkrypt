@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+apps/**/dist/
+
+# vite
+apps/web/.vite/
+
+# cloudflare
+apps/worker/.wrangler/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# env
+.env
+.env.*
+
+apps/worker/wrangler.toml
+
+# local dev
+apps/worker/.dev.vars
+

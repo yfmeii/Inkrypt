@@ -1,0 +1,17 @@
+{
+  "name": "inkrypt",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n worker,web -c blue,green \"npm:dev:worker\" \"npm:dev:web\"",
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:worker": "npm --workspace apps/worker run dev",
+    "build": "npm --workspace apps/worker run build && npm --workspace apps/web run build",
+    "typecheck": "npm --workspace apps/worker run typecheck && npm --workspace apps/web run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
