@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Bytes, NotePayload } from '../lib/crypto'
 import { clearRememberedUnlockedSession, loadRememberedUnlockedSession, rememberUnlockedSession } from '../lib/remember'
+import { isValidThemeId, loadThemeCSS, type ThemeId } from '../lib/themes'
 
 export type DecryptedNote = {
   id: string
@@ -10,13 +11,18 @@ export type DecryptedNote = {
   payload: NotePayload
 }
 
-export type ThemeId = 'violet' | 'ocean' | 'emerald' | 'rose' | 'amber'
+// Re-export ThemeId from themes module for external use
+export type { ThemeId } from '../lib/themes'
+export type ModeId = 'light' | 'dark' | 'system'
 
 const DEFAULT_BRAND_NAME = 'Inkrypt'
-const DEFAULT_THEME: ThemeId = 'ocean'
+const DEFAULT_THEME: ThemeId = 'default'
+const DEFAULT_MODE: ModeId = 'system'
 
 const LS_BRAND_NAME = 'inkrypt_brand_name'
 const LS_THEME = 'inkrypt_theme'
+const LS_COLOR_THEME = 'inkrypt_color_theme'
+const LS_MODE = 'inkrypt_mode'
 
 function isBrowser(): boolean {
   return typeof window !== 'undefined' && typeof document !== 'undefined'
@@ -41,8 +47,13 @@ function safeLocalStorageSetItem(key: string, value: string): void {
 }
 
 function normalizeThemeId(raw: string | null): ThemeId {
-  if (raw === 'violet' || raw === 'ocean' || raw === 'emerald' || raw === 'rose' || raw === 'amber') return raw
+  if (raw && isValidThemeId(raw)) return raw
   return DEFAULT_THEME
+}
+
+function normalizeModeId(raw: string | null): ModeId {
+  if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
+  return DEFAULT_MODE
 }
 
 function syncThemeColorMeta(): void {
@@ -51,9 +62,7 @@ function syncThemeColorMeta(): void {
   if (!meta) return
 
   const styles = getComputedStyle(document.documentElement)
-  const color =
-    styles.getPropertyValue('--md-sys-color-surface').trim() ||
-    styles.getPropertyValue('--md-sys-color-background').trim()
+  const color = styles.getPropertyValue('--background').trim()
 
   if (!color) return
   meta.setAttribute('content', color)
@@ -65,15 +74,35 @@ function scheduleThemeColorSync(): void {
   else syncThemeColorMeta()
 }
 
+function getSystemPrefersDark(): boolean {
+  if (!isBrowser()) return false
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+}
+
 function applyThemeToDocument(theme: ThemeId): void {
   if (!isBrowser()) return
-  // `violet` is the base theme (no `data-theme` attribute).
-  if (theme === 'violet') {
+  
+  // Load theme CSS dynamically
+  loadThemeCSS(theme)
+  
+  // Set data-theme attribute for any theme-specific selectors
+  if (theme === 'default') {
     document.documentElement.removeAttribute('data-theme')
-    scheduleThemeColorSync()
-    return
+  } else {
+    document.documentElement.setAttribute('data-theme', theme)
   }
-  document.documentElement.setAttribute('data-theme', theme)
+  scheduleThemeColorSync()
+}
+
+function applyModeToDocument(mode: ModeId): void {
+  if (!isBrowser()) return
+  const isDark = mode === 'dark' || (mode === 'system' && getSystemPrefersDark())
+  
+  if (isDark) {
+    document.documentElement.classList.add('dark')
+  } else {
+    document.documentElement.classList.remove('dark')
+  }
   scheduleThemeColorSync()
 }
 
@@ -86,6 +115,7 @@ type InkryptState = {
 
   brandName: string
   theme: ThemeId
+  mode: ModeId
 
   notes: DecryptedNote[]
   selectedNoteId: string | null
@@ -101,6 +131,7 @@ type InkryptState = {
   consumePairingPrefillSecret: () => string | null
   setBrandName: (brandName: string) => void
   setTheme: (theme: ThemeId) => void
+  setMode: (mode: ModeId) => void
   hydrateRememberedSession: () => Promise<void>
   lock: () => void
 
@@ -110,6 +141,12 @@ type InkryptState = {
   selectNote: (id: string | null) => void
 }
 
+// Initialize theme and mode from storage
+const initialTheme = normalizeThemeId(
+  safeLocalStorageGetItem(LS_COLOR_THEME) ?? safeLocalStorageGetItem(LS_THEME)
+)
+const initialMode = normalizeModeId(safeLocalStorageGetItem(LS_MODE))
+
 export const useInkryptStore = create<InkryptState>((set, get) => ({
   masterKey: null,
   credentialId: null,
@@ -118,7 +155,8 @@ export const useInkryptStore = create<InkryptState>((set, get) => ({
   pairingPrefillSecret: null,
 
   brandName: safeLocalStorageGetItem(LS_BRAND_NAME) ?? DEFAULT_BRAND_NAME,
-  theme: normalizeThemeId(safeLocalStorageGetItem(LS_THEME)),
+  theme: initialTheme,
+  mode: initialMode,
 
   notes: [],
   selectedNoteId: null,
@@ -160,9 +198,16 @@ export const useInkryptStore = create<InkryptState>((set, get) => ({
   },
 
   setTheme: (theme) => {
-    set({ theme })
-    safeLocalStorageSetItem(LS_THEME, theme)
-    applyThemeToDocument(theme)
+    const normalized = normalizeThemeId(theme)
+    set({ theme: normalized })
+    safeLocalStorageSetItem(LS_COLOR_THEME, normalized)
+    applyThemeToDocument(normalized)
+  },
+
+  setMode: (mode) => {
+    set({ mode })
+    safeLocalStorageSetItem(LS_MODE, mode)
+    applyModeToDocument(mode)
   },
 
   hydrateRememberedSession: async () => {
@@ -221,13 +266,31 @@ export const useInkryptStore = create<InkryptState>((set, get) => ({
   },
 }))
 
-// Apply theme ASAP on initial import
-applyThemeToDocument(normalizeThemeId(safeLocalStorageGetItem(LS_THEME)))
+// 在模块导入时立即应用主题和模式，避免页面闪烁
+if (typeof document !== 'undefined') {
+  const applyInitialTheme = () => {
+    applyThemeToDocument(initialTheme)
+    applyModeToDocument(initialMode)
+  }
+  
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyInitialTheme)
+  } else {
+    applyInitialTheme()
+  }
+}
 
 // Keep browser UI theme-color in sync with system scheme changes
 if (isBrowser() && 'matchMedia' in window) {
   const mql = window.matchMedia('(prefers-color-scheme: dark)')
-  const onChange = () => scheduleThemeColorSync()
+  const onChange = () => {
+    // Re-apply mode when system preference changes (for 'system' mode)
+    const currentMode = useInkryptStore.getState().mode
+    if (currentMode === 'system') {
+      applyModeToDocument('system')
+    }
+    scheduleThemeColorSync()
+  }
   if ('addEventListener' in mql) {
     mql.addEventListener('change', onChange)
   } else {

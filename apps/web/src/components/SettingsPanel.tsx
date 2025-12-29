@@ -1,10 +1,43 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { motion, AnimatePresence } from 'motion/react'
 import { deleteJSON, getJSON, postJSON } from '../lib/api'
 import { formatErrorZh } from '../lib/errors'
 import { useFocusTrap } from '../lib/focusTrap'
 import { useBodyScrollLock } from '../lib/scrollLock'
-import type { ThemeId } from '../state/store'
-import { ConfirmDialog } from './ConfirmDialog'
+import type { ModeId, ThemeId } from '../state/store'
+import { THEME_META } from '../lib/themes'
+import { cn } from '../lib/utils'
+import { Button } from './ui/button'
+import { Input } from './ui/input'
+import { Label } from './ui/label'
+import { Card, CardContent } from './ui/card'
+import { ScrollArea } from './ui/scroll-area'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog'
+import {
+  X,
+  RefreshCw,
+  Pencil,
+  Trash2,
+  Smartphone,
+  Cloud,
+  Key,
+  HelpCircle,
+  Check,
+  Sun,
+  Moon,
+  Monitor,
+  Loader2,
+  ChevronRight,
+} from 'lucide-react'
 
 interface SettingsPanelProps {
   isOpen: boolean
@@ -13,8 +46,9 @@ interface SettingsPanelProps {
   onSetBrandName: (brandName: string) => void
   theme: ThemeId
   onSetTheme: (theme: ThemeId) => void
+  mode: ModeId
+  onSetMode: (mode: ModeId) => void
   credentialId: string | null
-  deviceName: string | null
   onSetDeviceName: (deviceName: string | null) => void
   onLock: () => void
   busy: boolean
@@ -26,6 +60,86 @@ interface SettingsPanelProps {
   onShowHelp: () => void
 }
 
+const MODE_OPTIONS: Array<{ id: ModeId; label: string; icon: React.ReactNode }> = [
+  { id: 'light', label: '浅色', icon: <Sun className="h-4 w-4" /> },
+  { id: 'dark', label: '深色', icon: <Moon className="h-4 w-4" /> },
+  { id: 'system', label: '跟随系统', icon: <Monitor className="h-4 w-4" /> },
+]
+
+function useIsDark(mode: ModeId): boolean {
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window === 'undefined') return false
+    if (mode === 'dark') return true
+    if (mode === 'light') return false
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  })
+
+  useEffect(() => {
+    if (mode === 'dark') {
+      setIsDark(true)
+      return
+    }
+    if (mode === 'light') {
+      setIsDark(false)
+      return
+    }
+    const mql = window.matchMedia('(prefers-color-scheme: dark)')
+    setIsDark(mql.matches)
+    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches)
+    mql.addEventListener('change', handler)
+    return () => mql.removeEventListener('change', handler)
+  }, [mode])
+
+  return isDark
+}
+
+// Section Header Component
+function SectionHeader({ title, description }: { title: string; description?: string }) {
+  return (
+    <div className="space-y-1">
+      <h3 className="text-sm font-medium text-foreground">{title}</h3>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+    </div>
+  )
+}
+
+// Action Item Component
+function ActionItem({
+  icon: Icon,
+  label,
+  description,
+  onClick,
+  disabled,
+}: {
+  icon: React.ElementType
+  label: string
+  description?: string
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'w-full flex items-center gap-4 p-4 rounded-xl transition-colors text-left',
+        'hover:bg-accent/50 active:bg-accent',
+        'disabled:opacity-50 disabled:cursor-not-allowed'
+      )}
+    >
+      <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
+        <Icon className="h-5 w-5 text-muted-foreground" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium">{label}</div>
+        {description && <div className="text-xs text-muted-foreground truncate">{description}</div>}
+      </div>
+      <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+    </button>
+  )
+}
+
 export function SettingsPanel({
   isOpen,
   onClose,
@@ -33,8 +147,9 @@ export function SettingsPanel({
   onSetBrandName,
   theme,
   onSetTheme,
+  mode,
+  onSetMode,
   credentialId,
-  deviceName,
   onSetDeviceName,
   onLock,
   busy,
@@ -46,34 +161,16 @@ export function SettingsPanel({
   onShowHelp,
 }: SettingsPanelProps) {
   const [mounted, setMounted] = useState(isOpen)
-  const [active, setActive] = useState(false)
   const titleId = useId()
   const panelRef = useRef<HTMLDivElement | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const themeOptionRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const isDark = useIsDark(mode)
+  const [showThemes, setShowThemes] = useState(false)
 
   useEffect(() => {
-    if (isOpen) {
-      setMounted(true)
-      const raf = requestAnimationFrame(() => setActive(true))
-      return () => cancelAnimationFrame(raf)
-    }
-    setActive(false)
+    if (isOpen) setMounted(true)
   }, [isOpen])
-
-  useEffect(() => {
-    if (!mounted || isOpen) return
-    if (!('matchMedia' in window)) return
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setMounted(false)
-    }
-  }, [isOpen, mounted])
-
-  useEffect(() => {
-    if (!mounted || isOpen) return
-    const t = window.setTimeout(() => setMounted(false), 260)
-    return () => window.clearTimeout(t)
-  }, [isOpen, mounted])
 
   const [brandDraft, setBrandDraft] = useState(brandName)
   useEffect(() => setBrandDraft(brandName), [brandName, isOpen])
@@ -91,7 +188,6 @@ export function SettingsPanel({
   const [devices, setDevices] = useState<DeviceItem[] | null>(null)
   const [devicesBusy, setDevicesBusy] = useState(false)
   const [devicesError, setDevicesError] = useState<string | null>(null)
-
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [saving, setSaving] = useState(false)
@@ -100,18 +196,6 @@ export function SettingsPanel({
 
   useFocusTrap(panelRef, Boolean(isOpen) && !confirmRevoke)
   useBodyScrollLock(mounted)
-
-  const themeOptions = useMemo(
-    () =>
-      [
-        { id: 'ocean' as const, label: '海洋蓝（默认）' },
-        { id: 'violet' as const, label: '柔紫' },
-        { id: 'emerald' as const, label: '翡翠绿' },
-        { id: 'rose' as const, label: '玫瑰粉' },
-        { id: 'amber' as const, label: '琥珀橙' },
-      ] satisfies Array<{ id: ThemeId; label: string }>,
-    [],
-  )
 
   function formatTs(ts: number | null): string {
     if (!ts || !Number.isFinite(ts)) return '—'
@@ -174,7 +258,6 @@ export function SettingsPanel({
 
   async function revokeDevice(targetId: string, isCurrent: boolean): Promise<void> {
     if (deletingId) return
-
     setDeletingId(targetId)
     setDevicesError(null)
     try {
@@ -191,7 +274,6 @@ export function SettingsPanel({
     }
   }
 
-  // Close on Escape key
   useEffect(() => {
     if (!isOpen) return
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -203,12 +285,10 @@ export function SettingsPanel({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [confirmRevoke, isOpen, onClose])
 
-  // Close on click outside
   useEffect(() => {
     if (!isOpen) return
     setDevices(null)
     void loadDevices()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
 
   const sortedDevices = useMemo(() => {
@@ -218,399 +298,398 @@ export function SettingsPanel({
       const aCurrent = Boolean(credentialId && a.id === credentialId)
       const bCurrent = Boolean(credentialId && b.id === credentialId)
       if (aCurrent !== bCurrent) return aCurrent ? -1 : 1
-
       const aLast = a.lastUsedAt ?? 0
       const bLast = b.lastUsedAt ?? 0
       if (aLast !== bLast) return bLast - aLast
-
       const aCreated = a.createdAt ?? 0
       const bCreated = b.createdAt ?? 0
       if (aCreated !== bCreated) return bCreated - aCreated
-
       return a.id.localeCompare(b.id)
     })
     return next
   }, [credentialId, devices])
 
+  const currentThemeMeta = THEME_META.find((t) => t.id === theme)
+
   if (!mounted) return null
 
   return (
-    <div
-      className={active ? 'settingsOverlay open' : 'settingsOverlay'}
-      onClick={() => {
-        if (confirmRevoke) return
-        onClose()
-      }}
-      role="presentation"
-    >
-      <div
-        className="settingsPanel"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        ref={panelRef}
-        tabIndex={-1}
-        onTransitionEnd={(e) => {
-          if (e.target !== e.currentTarget) return
-          if (e.propertyName !== 'transform') return
-          if (!isOpen) setMounted(false)
-        }}
-      >
-        <div className="settingsHeader">
-          <strong id={titleId}>设置</strong>
-          <button className="iconBtn" onClick={onClose} type="button" title="关闭" aria-label="关闭设置">
-            <svg viewBox="0 0 24 24">
-              <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-            </svg>
-          </button>
-        </div>
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          {/* Backdrop */}
+          <motion.div
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => {
+              if (confirmRevoke) return
+              onClose()
+            }}
+            role="presentation"
+          />
 
-        <div className="settingsItems">
-          <div className="settingsSection">
-            <div className="settingsSectionTitle">外观</div>
-
-            <label className="field settingsField">
-              <span>左上角显示名称</span>
-              <div className="settingsInlineRow">
-                <input
-                  value={brandDraft}
-                  onChange={(e) => setBrandDraft(e.target.value)}
-                  placeholder="例如：私人笔记库"
-                  maxLength={32}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      e.preventDefault()
-                      setBrandDraft(brandName)
-                      window.requestAnimationFrame(() => e.currentTarget.select())
-                      return
-                    }
-                     if (e.key !== 'Enter') return
-                     if (!brandDirty) return
-                     e.preventDefault()
-                     onSetBrandName(normalizedBrandDraft)
-                   }}
-                 />
-                 <button
-                   className="btn primary"
-                   type="button"
-                   onClick={() => onSetBrandName(normalizedBrandDraft)}
-                   disabled={!brandDirty}
-                   title="保存"
-                 >
-                   保存
-                 </button>
-              </div>
-              {brandDirty ? <div className="muted small">已修改，点击“保存”后生效。</div> : null}
-            </label>
-
-            <label className="field settingsField">
-              <span>主题配色</span>
-              <div
-                className="themePicker"
-                role="radiogroup"
-                aria-label="主题配色"
-                aria-orientation="vertical"
-                onKeyDown={(e) => {
-                  if (!themeOptions.length) return
-                  const currentIndex = themeOptions.findIndex((t) => t.id === theme)
-                  if (currentIndex < 0) return
-
-                  const lastIndex = themeOptions.length - 1
-                  let nextIndex = currentIndex
-
-                  if (e.key === 'ArrowDown' || e.key === 'ArrowRight') nextIndex = currentIndex >= lastIndex ? 0 : currentIndex + 1
-                  else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') nextIndex = currentIndex <= 0 ? lastIndex : currentIndex - 1
-                  else if (e.key === 'Home') nextIndex = 0
-                  else if (e.key === 'End') nextIndex = lastIndex
-                  else return
-
-                  e.preventDefault()
-                  const nextTheme = themeOptions[nextIndex]
-                  onSetTheme(nextTheme.id)
-                  window.requestAnimationFrame(() => themeOptionRefs.current[nextIndex]?.focus())
-                }}
-              >
-                {themeOptions.map((t, idx) => (
-                  <button
-                    key={t.id}
-                    className={theme === t.id ? 'themeOption active' : 'themeOption'}
-                    type="button"
-                    role="radio"
-                    aria-checked={theme === t.id}
-                    tabIndex={theme === t.id ? 0 : -1}
-                    onClick={() => onSetTheme(t.id)}
-                    ref={(el) => {
-                      themeOptionRefs.current[idx] = el
-                    }}
-                  >
-                    <span className="themeSwatch" aria-hidden="true" style={{ background: `var(--inkrypt-swatch-${t.id})` }} />
-                    <span className="themeLabel">{t.label}</span>
-                    <span className="themeCheck" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" focusable="false">
-                        <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" />
-                      </svg>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </label>
-          </div>
-
-          <div className="settingsDivider" />
-
-          <div className="settingsSection">
-            <div className="settingsSectionHeader">
-              <div className="settingsSectionTitle">设备</div>
-              <button
-                className="iconBtn"
-                onClick={() => void loadDevices()}
-                type="button"
-                title={devicesBusy ? '正在刷新…' : '刷新'}
-                aria-label={devicesBusy ? '正在刷新设备列表' : '刷新设备列表'}
-                aria-busy={devicesBusy ? true : undefined}
-                disabled={devicesBusy}
-              >
-                {devicesBusy ? (
-                  <span className="spinner" aria-hidden="true" />
-                ) : (
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
-                  </svg>
-                )}
-              </button>
+          {/* Panel */}
+          <motion.div
+            className="fixed right-0 top-0 z-50 h-full w-full max-w-md bg-background shadow-2xl flex flex-col"
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            ref={panelRef}
+            tabIndex={-1}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-border/50">
+              <h2 id={titleId} className="text-xl font-semibold">设置</h2>
+              <Button variant="ghost" size="icon" onClick={onClose} className="h-9 w-9 rounded-xl" aria-label="关闭设置">
+                <X className="h-5 w-5" />
+              </Button>
             </div>
 
-            {devicesError ? (
-              <div className="settingsError errorBox" role="alert">
-                <div className="settingsErrorHeader">
-                  <strong>加载失败</strong>
-                  <button className="iconBtn" type="button" onClick={() => setDevicesError(null)} aria-label="关闭错误提示" title="关闭">
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-                    </svg>
-                  </button>
-                </div>
-                <div className="settingsErrorText small">{devicesError}</div>
-              </div>
-            ) : null}
+            <ScrollArea className="flex-1">
+              <div className="p-6 space-y-8">
+                {/* Appearance Section */}
+                <section className="space-y-5">
+                  <SectionHeader title="外观" description="自定义应用的视觉风格" />
 
-            <div className="settingsDeviceList">
-              {devicesBusy ? (
-                <div className="muted small" role="status" aria-live="polite">
-                  加载中…
-                </div>
-              ) : null}
-
-              {!devicesBusy && devices && devices.length === 0 ? (
-                <div className="muted small">暂无设备</div>
-              ) : null}
-
-              {sortedDevices?.map((d) => {
-                const isCurrent = Boolean(credentialId && d.id === credentialId)
-                const isEditing = editingId === d.id
-                const renameDirty = editingName.trim() !== (d.deviceName ?? '')
-                const deviceControlsDisabled = busy || devicesBusy || saving || Boolean(deletingId)
-                return (
-                  <div key={d.id} className="settingsDeviceRow">
-                    <div className="settingsDeviceMain">
-                      <div className="settingsDeviceNameRow">
-                        <div className="settingsDeviceName">{d.deviceName || '未命名设备'}</div>
-                        {isCurrent ? <span className="settingsPill">本机</span> : null}
-                      </div>
-                      <div className="settingsDeviceInfo muted small">
-                        <div className="settingsDeviceId" title={d.id}>
-                          设备 ID：{shortId(d.id)}
-                        </div>
-                        <div>
-                          <span>上次使用：{formatTs(d.lastUsedAt)}</span>
-                          {d.createdAt ? (
-                            <>
-                              <span className="settingsDot">·</span>
-                              <span>创建：{formatTs(d.createdAt)}</span>
-                            </>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      {editingId === d.id ? (
-                        <div className="settingsInlineRow settingsInlineRowTight">
-                          <input
-                            ref={renameInputRef}
-                            value={editingName}
-                            onChange={(e) => setEditingName(e.target.value)}
-                            placeholder="设备名称（可留空）"
-                            maxLength={64}
-                            aria-label="设备名称"
-                            disabled={deviceControlsDisabled}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Escape') {
-                                e.preventDefault()
-                                cancelRename()
-                                return
-                              }
-                              if (e.key !== 'Enter') return
-                              if (!renameDirty) return
-                              if (deviceControlsDisabled) return
-                              e.preventDefault()
-                              void saveRename(d.id)
-                            }}
-                          />
-                          <button
-                            className="btn primary"
-                            type="button"
-                            onClick={() => void saveRename(d.id)}
-                            disabled={!renameDirty || deviceControlsDisabled}
-                            aria-busy={saving ? true : undefined}
-                          >
-                            {saving ? <span className="spinner" aria-hidden="true" /> : null}
-                            保存
-                          </button>
-                          <button
-                            className="btn"
-                            type="button"
-                            onClick={() => {
-                              cancelRename()
-                            }}
-                            disabled={saving}
-                          >
-                            取消
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className="settingsDeviceActions">
-                      <button
-                        className={isEditing ? 'iconBtn active' : 'iconBtn'}
-                        type="button"
-                        title={isEditing ? '取消重命名' : '重命名'}
-                        aria-label={isEditing ? '取消重命名' : '重命名'}
-                        aria-pressed={isEditing}
-                        onClick={() => {
-                          if (isEditing) {
-                            cancelRename()
-                            return
-                          }
-                          setEditingId(d.id)
-                          setEditingName(d.deviceName ?? '')
-                        }}
-                        disabled={deviceControlsDisabled}
-                      >
-                        <svg viewBox="0 0 24 24">
-                          <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm17.71-10.21a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" />
-                        </svg>
-                      </button>
-                      <button
-                        className="iconBtn danger"
-                        type="button"
-                        title="移除"
-                        aria-label="移除"
-                        onClick={() => requestRevokeDevice(d.id)}
-                        disabled={deviceControlsDisabled}
-                        aria-busy={deletingId === d.id ? true : undefined}
-                      >
-                        {deletingId === d.id ? (
-                          <span className="spinner" aria-hidden="true" />
-                        ) : (
-                          <svg viewBox="0 0 24 24">
-                            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
-                          </svg>
-                        )}
-                      </button>
+                  {/* Mode Picker */}
+                  <div className="space-y-3">
+                    <Label className="text-xs text-muted-foreground">主题模式</Label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {MODE_OPTIONS.map((option) => (
+                        <Button
+                          key={option.id}
+                          variant={mode === option.id ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => onSetMode(option.id)}
+                          className="h-10 gap-2"
+                        >
+                          {option.icon}
+                          <span className="text-xs">{option.label}</span>
+                        </Button>
+                      ))}
                     </div>
                   </div>
-                )
-              })}
-            </div>
 
-            {deviceName ? (
-              <div className="settingsHint muted small">当前设备名称：{deviceName}</div>
-            ) : (
-              <div className="settingsHint muted small">本机名称未设置（可在上方重命名）。</div>
-            )}
-          </div>
+                  {/* Theme Picker Toggle */}
+                  <div className="space-y-3">
+                    <Label className="text-xs text-muted-foreground">配色方案</Label>
+                    <button
+                      type="button"
+                      onClick={() => setShowThemes(!showThemes)}
+                      className="w-full flex items-center gap-4 p-4 rounded-xl border border-border/50 hover:bg-accent/30 transition-colors"
+                    >
+                      <div className="flex-shrink-0 w-10 h-10 rounded-xl overflow-hidden border border-border/50">
+                        {currentThemeMeta && (
+                          <div
+                            className="w-full h-full flex items-center justify-center gap-1"
+                            style={{ backgroundColor: (isDark ? currentThemeMeta.swatch.dark : currentThemeMeta.swatch.light).background }}
+                          >
+                            <div className="w-3 h-3 rounded" style={{ backgroundColor: (isDark ? currentThemeMeta.swatch.dark : currentThemeMeta.swatch.light).primary }} />
+                            <div className="w-3 h-3 rounded" style={{ backgroundColor: (isDark ? currentThemeMeta.swatch.dark : currentThemeMeta.swatch.light).foreground }} />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 text-left">
+                        <div className="text-sm font-medium">{currentThemeMeta?.label || '默认'}</div>
+                        <div className="text-xs text-muted-foreground">{THEME_META.length} 款主题可选</div>
+                      </div>
+                      <ChevronRight className={cn('h-4 w-4 text-muted-foreground transition-transform', showThemes && 'rotate-90')} />
+                    </button>
 
-          <button
-            className="settingsItem"
-            onClick={() => {
-              onStartPairing()
-              onClose()
-            }}
-            disabled={busy || pairingBusy}
-            type="button"
-          >
-            <svg viewBox="0 0 24 24">
-              <path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14zm-4.2-5.78v1.75l3.2-2.99L12.8 9v1.7c-3.11.43-4.35 2.56-4.8 4.7 1.11-1.5 2.58-2.18 4.8-2.18z" />
-            </svg>
-            <span>添加新设备</span>
-          </button>
+                    {/* Theme Grid */}
+                    <AnimatePresence>
+                      {showThemes && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="max-h-64 overflow-y-auto pt-2 pr-1">
+                          <div
+                            className="grid grid-cols-4 gap-2"
+                            role="radiogroup"
+                            aria-label="主题配色"
+                            onKeyDown={(e) => {
+                              if (!THEME_META.length) return
+                              const currentIndex = THEME_META.findIndex((t) => t.id === theme)
+                              if (currentIndex < 0) return
+                              const lastIndex = THEME_META.length - 1
+                              let nextIndex = currentIndex
+                              if (e.key === 'ArrowDown' || e.key === 'ArrowRight') nextIndex = currentIndex >= lastIndex ? 0 : currentIndex + 1
+                              else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') nextIndex = currentIndex <= 0 ? lastIndex : currentIndex - 1
+                              else if (e.key === 'Home') nextIndex = 0
+                              else if (e.key === 'End') nextIndex = lastIndex
+                              else return
+                              e.preventDefault()
+                              const nextTheme = THEME_META[nextIndex]
+                              onSetTheme(nextTheme.id)
+                              window.requestAnimationFrame(() => themeOptionRefs.current[nextIndex]?.focus())
+                            }}
+                          >
+                            {THEME_META.map((themeMeta, idx) => {
+                              const isActive = theme === themeMeta.id
+                              const swatchColors = isDark ? themeMeta.swatch.dark : themeMeta.swatch.light
+                              return (
+                                <button
+                                  key={themeMeta.id}
+                                  className={cn(
+                                    'group relative cursor-pointer rounded-xl border transition-all overflow-hidden',
+                                    isActive ? 'border-primary ring-2 ring-primary/20' : 'border-border/50 hover:border-border hover:shadow-sm'
+                                  )}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={isActive}
+                                  tabIndex={isActive ? 0 : -1}
+                                  onClick={() => onSetTheme(themeMeta.id)}
+                                  ref={(el) => { themeOptionRefs.current[idx] = el }}
+                                >
+                                  <div className="h-9 w-full relative" style={{ backgroundColor: swatchColors.background }}>
+                                    <div className="flex h-full items-center justify-center gap-1">
+                                      <div className="h-4 w-4 rounded" style={{ backgroundColor: swatchColors.primary }} />
+                                      <div className="h-4 w-4 rounded" style={{ backgroundColor: swatchColors.foreground }} />
+                                    </div>
+                                    {isActive && (
+                                      <div className="absolute top-1 right-1 rounded-full p-0.5" style={{ backgroundColor: swatchColors.primary }}>
+                                        <Check className="h-2 w-2" style={{ color: swatchColors.background }} />
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="px-1.5 py-1 border-t border-border/30 bg-card">
+                                    <div className={cn('text-[10px] font-medium text-center truncate', isActive ? 'text-primary' : 'text-muted-foreground')}>
+                                      {themeMeta.label}
+                                    </div>
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
 
-          <button
-            className="settingsItem"
-            onClick={() => {
-              onSync()
-              onClose()
-            }}
-            disabled={busy}
-            type="button"
-          >
-            <svg viewBox="0 0 24 24">
-              <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
-            </svg>
-            <span>从云端同步</span>
-          </button>
+                  {/* Brand Name */}
+                  <div className="space-y-3">
+                    <Label htmlFor="brand-name" className="text-xs text-muted-foreground">显示名称</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="brand-name"
+                        value={brandDraft}
+                        onChange={(e) => setBrandDraft(e.target.value)}
+                        placeholder="例如：私人笔记库"
+                        maxLength={32}
+                        className="h-10"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            e.preventDefault()
+                            setBrandDraft(brandName)
+                            window.requestAnimationFrame(() => e.currentTarget.select())
+                            return
+                          }
+                          if (e.key !== 'Enter') return
+                          if (!brandDirty) return
+                          e.preventDefault()
+                          onSetBrandName(normalizedBrandDraft)
+                        }}
+                      />
+                      <Button onClick={() => onSetBrandName(normalizedBrandDraft)} disabled={!brandDirty} size="sm" className="h-10 px-4">
+                        保存
+                      </Button>
+                    </div>
+                  </div>
+                </section>
 
-          <button
-            className="settingsItem"
-            onClick={() => {
-              onShowRecoveryCode()
-              onClose()
-            }}
-            disabled={!masterKey}
-            type="button"
-          >
-            <svg viewBox="0 0 24 24">
-              <path d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z" />
-            </svg>
-            <span>恢复码</span>
-          </button>
+                {/* Devices Section */}
+                <section className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <SectionHeader title="设备管理" description="管理已授权的设备" />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => void loadDevices()}
+                      disabled={devicesBusy}
+                      className="h-8 w-8 rounded-lg"
+                      aria-label={devicesBusy ? '正在刷新' : '刷新'}
+                    >
+                      <RefreshCw className={cn('h-4 w-4', devicesBusy && 'animate-spin')} />
+                    </Button>
+                  </div>
 
-          <button
-            className="settingsItem"
-            onClick={() => {
-              onShowHelp()
-              onClose()
-            }}
-            disabled={busy}
-            type="button"
-          >
-            <svg viewBox="0 0 24 24">
-              <path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z" />
-            </svg>
-            <span>帮助</span>
-          </button>
-        </div>
-      </div>
+                  {devicesError && (
+                    <Card className="border-destructive/50 bg-destructive/5">
+                      <CardContent className="p-3 flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium text-destructive">加载失败</p>
+                          <p className="text-xs text-destructive/80">{devicesError}</p>
+                        </div>
+                        <Button variant="ghost" size="icon" onClick={() => setDevicesError(null)} className="h-6 w-6" aria-label="关闭">
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  )}
 
-      {confirmRevoke ? (
-        <ConfirmDialog
-          title={confirmRevoke.isCurrent ? '移除当前设备？' : '移除设备？'}
-          message={
-            confirmRevoke.isCurrent
-              ? '你将移除本机的 Passkey。\n\n移除后会立即退出；之后需要用其他设备重新加入/解锁。\n\n确定要继续吗？'
-              : '确定要移除该设备的 Passkey 吗？\n\n移除后，该设备将无法再解锁此保险库。'
-          }
-          confirmText="移除"
-          confirmVariant="danger"
-          onCancel={() => setConfirmRevoke(null)}
-          onConfirm={() => {
-            const ctx = confirmRevoke
-            setConfirmRevoke(null)
-            void revokeDevice(ctx.targetId, ctx.isCurrent)
-          }}
-        />
-      ) : null}
-    </div>
+                  <div className="space-y-2">
+                    {devicesBusy && !devices && (
+                      <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        加载中…
+                      </div>
+                    )}
+
+                    {!devicesBusy && devices && devices.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-8">暂无设备</p>
+                    )}
+
+                    {sortedDevices?.map((d) => {
+                      const isCurrent = Boolean(credentialId && d.id === credentialId)
+                      const isEditing = editingId === d.id
+                      const renameDirty = editingName.trim() !== (d.deviceName ?? '')
+                      const deviceControlsDisabled = busy || devicesBusy || saving || Boolean(deletingId)
+
+                      return (
+                        <Card key={d.id} className={cn('py-0 gap-0 transition-all', isCurrent && 'ring-2 ring-primary/20')}>
+                          <CardContent className="px-3 py-2">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1 space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="truncate text-sm font-medium">{d.deviceName || '未命名设备'}</span>
+                                  {isCurrent && (
+                                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">本机</span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  <span title={d.id}>ID: {shortId(d.id)}</span>
+                                  <span className="mx-1.5">·</span>
+                                  <span>上次: {formatTs(d.lastUsedAt)}</span>
+                                </div>
+
+                                {isEditing && (
+                                  <div className="mt-3 flex gap-2">
+                                    <Input
+                                      ref={renameInputRef}
+                                      value={editingName}
+                                      onChange={(e) => setEditingName(e.target.value)}
+                                      placeholder="设备名称"
+                                      maxLength={64}
+                                      className="h-8 text-sm"
+                                      disabled={deviceControlsDisabled}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Escape') { e.preventDefault(); cancelRename(); return }
+                                        if (e.key !== 'Enter' || !renameDirty || deviceControlsDisabled) return
+                                        e.preventDefault()
+                                        void saveRename(d.id)
+                                      }}
+                                    />
+                                    <Button size="sm" onClick={() => void saveRename(d.id)} disabled={!renameDirty || deviceControlsDisabled} className="h-8">
+                                      {saving && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}保存
+                                    </Button>
+                                    <Button variant="outline" size="sm" onClick={cancelRename} disabled={saving} className="h-8">取消</Button>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex shrink-0 gap-1">
+                                <Button
+                                  variant={isEditing ? 'secondary' : 'ghost'}
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => { if (isEditing) { cancelRename(); return } setEditingId(d.id); setEditingName(d.deviceName ?? '') }}
+                                  disabled={deviceControlsDisabled}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                                  onClick={() => requestRevokeDevice(d.id)}
+                                  disabled={deviceControlsDisabled}
+                                >
+                                  {deletingId === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                </Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )
+                    })}
+                  </div>
+                </section>
+
+                {/* Quick Actions */}
+                <section className="space-y-5">
+                  <SectionHeader title="快捷操作" />
+                  <div className="rounded-xl border border-border/50 overflow-hidden divide-y divide-border/50">
+                    <ActionItem
+                      icon={Smartphone}
+                      label="添加新设备"
+                      description="通过扫码配对新设备"
+                      onClick={() => { onStartPairing(); onClose() }}
+                      disabled={busy || pairingBusy}
+                    />
+                    <ActionItem
+                      icon={Cloud}
+                      label="从云端同步"
+                      description="拉取最新数据"
+                      onClick={() => { onSync(); onClose() }}
+                      disabled={busy}
+                    />
+                    <ActionItem
+                      icon={Key}
+                      label="恢复码"
+                      description="查看账户恢复码"
+                      onClick={() => { onShowRecoveryCode(); onClose() }}
+                      disabled={!masterKey}
+                    />
+                    <ActionItem
+                      icon={HelpCircle}
+                      label="帮助"
+                      description="使用说明和常见问题"
+                      onClick={() => { onShowHelp(); onClose() }}
+                      disabled={busy}
+                    />
+                  </div>
+                </section>
+              </div>
+            </ScrollArea>
+          </motion.div>
+
+          {/* Confirm Dialog */}
+          <AlertDialog open={!!confirmRevoke} onOpenChange={(open) => !open && setConfirmRevoke(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{confirmRevoke?.isCurrent ? '移除当前设备？' : '移除设备？'}</AlertDialogTitle>
+                <AlertDialogDescription className="whitespace-pre-line">
+                  {confirmRevoke?.isCurrent
+                    ? '你将移除本机的 Passkey。\n\n移除后会立即退出；之后需要用其他设备重新加入/解锁。\n\n确定要继续吗？'
+                    : '确定要移除该设备的 Passkey 吗？\n\n移除后，该设备将无法再解锁此保险库。'}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>取消</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => { const ctx = confirmRevoke; setConfirmRevoke(null); if (ctx) void revokeDevice(ctx.targetId, ctx.isCurrent) }}
+                >
+                  移除
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      )}
+    </AnimatePresence>
   )
 }

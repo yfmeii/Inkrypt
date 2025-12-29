@@ -1,4 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
+import {
+  ScanLineIcon,
+  TrashIcon,
+  KeyIcon,
+  PlusIcon,
+  LinkIcon,
+  ChevronDownIcon,
+  InfoIcon,
+} from 'lucide-react'
 import { postJSON } from '../lib/api'
 import { type Bytes, base64UrlToBytes, bytesToBase64Url, randomBytes, unwrapMasterKey, wrapMasterKey } from '../lib/crypto'
 import { decryptMasterKeyFromTransfer, deriveSharedSecretBits, exportPublicKeyJwk, generateEphemeralEcdhKeyPair, generateSasEmoji } from '../lib/pairing'
@@ -16,19 +26,19 @@ import { Toast, ToastStack } from '../components/Toast'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useInkryptStore } from '../state/store'
 
-type Mode = 'unlock' | 'setup' | 'pair'
+// shadcn UI components
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { cn } from '@/lib/utils'
+import { AuroraBackground } from '@/components/animate-ui/aurora-background'
+import { Spinner } from '@/components/ui/spinner'
 
-const TAB_ORDER: Mode[] = ['unlock', 'setup', 'pair']
-const TAB_IDS: Record<Mode, string> = {
-  unlock: 'auth-tab-unlock',
-  setup: 'auth-tab-setup',
-  pair: 'auth-tab-pair',
-}
-const PANEL_IDS: Record<Mode, string> = {
-  unlock: 'auth-panel-unlock',
-  setup: 'auth-panel-setup',
-  pair: 'auth-panel-pair',
-}
+type Mode = 'unlock' | 'setup' | 'pair'
 
 type HandshakeStatus = {
   status: 'waiting_join' | 'waiting_confirm' | 'finished'
@@ -73,7 +83,6 @@ export function AuthView() {
   const [prepared, setPrepared] = useState<any | null>(null)
   const [preparedPrfSalt, setPreparedPrfSalt] = useState<string | null>(null)
 
-  const [pairingSharedSecret, setPairingSharedSecret] = useState<ArrayBuffer | null>(null)
   const [pairingSas, setPairingSas] = useState<string | null>(null)
   const [pairingExpiresAt, setPairingExpiresAt] = useState<number | null>(null)
   const [pairingMasterKey, setPairingMasterKey] = useState<Bytes | null>(null)
@@ -134,44 +143,6 @@ export function AuthView() {
     return Boolean(navigator.mediaDevices?.getUserMedia)
   }, [])
 
-  function focusTab(next: Mode): void {
-    const el = document.getElementById(TAB_IDS[next])
-    if (!el) return
-    try {
-      ;(el as HTMLButtonElement).focus()
-    } catch {
-      // ignore
-    }
-  }
-
-  function onTabKeyDown(e: ReactKeyboardEvent<HTMLButtonElement>): void {
-    const idx = TAB_ORDER.indexOf(mode)
-    if (idx < 0) return
-
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      e.preventDefault()
-      const delta = e.key === 'ArrowRight' ? 1 : -1
-      const next = TAB_ORDER[(idx + delta + TAB_ORDER.length) % TAB_ORDER.length]
-      setMode(next)
-      requestAnimationFrame(() => focusTab(next))
-      return
-    }
-
-    if (e.key === 'Home') {
-      e.preventDefault()
-      setMode(TAB_ORDER[0])
-      requestAnimationFrame(() => focusTab(TAB_ORDER[0]))
-      return
-    }
-
-    if (e.key === 'End') {
-      e.preventDefault()
-      const last = TAB_ORDER[TAB_ORDER.length - 1]
-      setMode(last)
-      requestAnimationFrame(() => focusTab(last))
-    }
-  }
-
   useEffect(() => {
     return () => {
       pairingRunIdRef.current += 1
@@ -184,7 +155,6 @@ export function AuthView() {
     setError(null)
     setBusy(false)
 
-    setPairingSharedSecret(null)
     setPairingSas(null)
     setPairingExpiresAt(null)
     setPairingMasterKey(null)
@@ -299,7 +269,7 @@ export function AuthView() {
       if (mode === 'setup') {
         const resp = await postJSON<{ initialized: boolean; options?: any }>('/auth/register/start', {})
         if (resp.initialized) {
-          setError('该保险库已创建；请直接在本设备“解锁”，或用“添加新设备”。')
+          setError('该保险库已创建；请直接在本设备"解锁"，或用"添加新设备"。')
           return
         }
         setPrepared(resp.options)
@@ -308,12 +278,12 @@ export function AuthView() {
 
       if (mode === 'unlock') {
         const preferredCredentialId = localStorage.getItem(LS_CREDENTIAL_ID) || undefined
-       const resp = await postJSON<{
-         options: any
-         prfSalt: string
-         credentialId: string
-         deviceName: string | null
-       }>('/auth/login/start', { credentialId: preferredCredentialId })
+        const resp = await postJSON<{
+          options: any
+          prfSalt: string
+          credentialId: string
+          deviceName: string | null
+        }>('/auth/login/start', { credentialId: preferredCredentialId })
 
         setPrepared(resp.options)
         setPreparedPrfSalt(resp.prfSalt)
@@ -357,7 +327,7 @@ export function AuthView() {
       }
 
       if (mode === 'unlock') {
-        if (!preparedPrfSalt) throw new Error('认证参数异常，请点击“重新准备”后再试')
+        if (!preparedPrfSalt) throw new Error('认证参数异常，请点击"重新准备"后再试')
         const prfSaltBytes = base64UrlToBytes(preparedPrfSalt)
 
         const { assertion, prfOutput } = await startAuthenticationWithPrf(prepared, prfSaltBytes)
@@ -390,7 +360,6 @@ export function AuthView() {
     setBusy(true)
     setPrepared(null)
     setPreparedPrfSalt(null)
-    setPairingSharedSecret(null)
     setPairingSas(null)
     setPairingExpiresAt(null)
     setPairingMasterKey(null)
@@ -424,7 +393,6 @@ export function AuthView() {
             keyPair.privateKey,
             status.alicePublicKey as JsonWebKey,
           )
-          setPairingSharedSecret(sharedSecret)
           setPairingSas(await generateSasEmoji(sharedSecret))
         }
 
@@ -434,7 +402,6 @@ export function AuthView() {
               keyPair.privateKey,
               status.alicePublicKey as JsonWebKey,
             )
-            setPairingSharedSecret(sharedSecret)
             setPairingSas(await generateSasEmoji(sharedSecret))
           }
 
@@ -463,7 +430,7 @@ export function AuthView() {
   async function finishPairing() {
     setError(null)
     if (!prepared) {
-      setError('请先完成“连接旧设备”，并等待密钥传输完成。')
+      setError('请先完成"连接旧设备"，并等待密钥传输完成。')
       return
     }
     if (!pairingMasterKey) {
@@ -497,342 +464,394 @@ export function AuthView() {
   }
 
   return (
-    <div className="auth">
-      <ToastStack>
-        {busy && !error ? <Toast kind="loading" message={prepared ? '处理中…' : '正在准备验证…'} /> : null}
-        {error ? <Toast kind="error" message={error} onClose={() => setError(null)} /> : null}
-      </ToastStack>
+    <AuroraBackground>
+      <motion.div
+        initial={{ opacity: 0, y: 40 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        transition={{
+          delay: 0.3,
+          duration: 0.8,
+          ease: "easeInOut",
+        }}
+        className="relative z-10 w-full max-w-lg px-4"
+      >
+        <ToastStack>
+          {busy && !error ? <Toast kind="loading" message={prepared ? '处理中…' : '正在准备验证…'} /> : null}
+          {error ? <Toast kind="error" message={error} onClose={() => setError(null)} /> : null}
+        </ToastStack>
 
-      <header className="authHeader">
-        <h1>{brandName}</h1>
-        <p className="muted">用 Passkey 解锁你的保险库。笔记默认端到端加密，只在你的设备解密。</p>
-      </header>
-
-      <div className="card authCard">
-        <div className="tabs" role="tablist" aria-label="认证模式">
-          <button
-            className={mode === 'unlock' ? 'tab active' : 'tab'}
-            onClick={() => {
-              setMode('unlock')
-            }}
-            type="button"
-            title="使用本设备的 Passkey 解锁保险库"
-            id={TAB_IDS.unlock}
-            role="tab"
-            aria-selected={mode === 'unlock'}
-            aria-controls={PANEL_IDS.unlock}
-            tabIndex={mode === 'unlock' ? 0 : -1}
-            onKeyDown={onTabKeyDown}
-          >
-            解锁
-          </button>
-          <button
-            className={mode === 'setup' ? 'tab active' : 'tab'}
-            onClick={() => {
-              setMode('setup')
-            }}
-            type="button"
-            title="首次使用：创建保险库并绑定本设备 Passkey"
-            id={TAB_IDS.setup}
-            role="tab"
-            aria-selected={mode === 'setup'}
-            aria-controls={PANEL_IDS.setup}
-            tabIndex={mode === 'setup' ? 0 : -1}
-            onKeyDown={onTabKeyDown}
-          >
-            创建保险库
-          </button>
-          <button
-            className={mode === 'pair' ? 'tab active' : 'tab'}
-            onClick={() => {
-              setMode('pair')
-            }}
-            type="button"
-            title="从已登录设备添加新设备（配对口令 + Emoji 校验）"
-            id={TAB_IDS.pair}
-            role="tab"
-            aria-selected={mode === 'pair'}
-            aria-controls={PANEL_IDS.pair}
-            tabIndex={mode === 'pair' ? 0 : -1}
-            onKeyDown={onTabKeyDown}
-          >
-            添加新设备
-          </button>
-        </div>
-
-        <div id={PANEL_IDS[mode]} role="tabpanel" aria-labelledby={TAB_IDS[mode]} tabIndex={0}>
-          <h2 className="sectionTitle">{title}</h2>
-
-          {mode === 'pair' ? (
-            <>
-              <div className="row" style={{ marginTop: 8 }}>
-                {canScanQr ? (
-                  <button className="btn" type="button" onClick={() => setScanOpen(true)} disabled={busy}>
-                    扫码输入
-                  </button>
-                ) : null}
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={() => setPairWords(Array.from({ length: PAIRING_SECRET_WORD_COUNT }, () => ''))}
-                  disabled={busy}
-                >
-                  清空
-                </button>
-              </div>
-
-              <label className="field">
-                <span>配对口令（{PAIRING_SECRET_WORD_COUNT} 个英文单词，约 5 分钟内有效）</span>
-                <div className="pairWordsGrid" role="group" aria-label="配对口令">
-                  {pairWords.map((word, idx) => {
-                    const resolved = resolvePairingWord(word)
-                    const cleaned = normalizePairWordInput(word)
-                    const invalid = Boolean(cleaned) && cleaned.length >= 4 && !resolved
-                    return (
-                      <input
-                        // eslint-disable-next-line react/no-array-index-key
-                        key={idx}
-                        ref={(el) => {
-                          pairWordRefs.current[idx] = el
-                        }}
-                        className={invalid ? 'pairWordInput invalid' : 'pairWordInput'}
-                        value={word}
-                        onChange={(e) => {
-                          const nextWord = normalizePairWordInput(e.target.value)
-                          setPairWords((prev) => {
-                            const next = [...prev]
-                            next[idx] = nextWord
-                            return next
-                          })
-                        }}
-                        onFocus={() => setActivePairWordIdx(idx)}
-                        onBlur={() => {
-                          if (!resolved || resolved === word) return
-                          setPairWords((prev) => {
-                            const next = [...prev]
-                            next[idx] = resolved
-                            return next
-                          })
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === ' ' || e.key === 'Enter') {
-                            e.preventDefault()
-                            pairWordRefs.current[Math.min(idx + 1, PAIRING_SECRET_WORD_COUNT - 1)]?.focus()
-                            return
-                          }
-                          if (e.key === 'Backspace' && !word && idx > 0) {
-                            pairWordRefs.current[idx - 1]?.focus()
-                          }
-                        }}
-                        onPaste={(e) => {
-                          const text = e.clipboardData.getData('text')
-                          if (!text) return
-
-                          const extracted = extractPairingSecretFromText(text)
-                          if (extracted) {
-                            e.preventDefault()
-                            setPairWords(splitPairingSecretWords(extracted))
-                            requestAnimationFrame(() => {
-                              pairWordRefs.current[Math.min(PAIRING_SECRET_WORD_COUNT - 1, idx + 1)]?.focus()
-                            })
-                            return
-                          }
-
-                          const words = splitPairingSecretWords(text)
-                          if (words.length <= 1) return
-                          e.preventDefault()
-                          setPairWords((prev) => {
-                            const next = [...prev]
-                            for (let i = 0; i < words.length && idx + i < PAIRING_SECRET_WORD_COUNT; i++) {
-                              next[idx + i] = words[i]
-                            }
-                            return next
-                          })
-                        }}
-                        inputMode="text"
-                        autoComplete="off"
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        placeholder={`单词 ${idx + 1}`}
-                      />
-                    )
-                  })}
-                </div>
-                {activePairWordSuggestions.length > 0 ? (
-                  <div className="pairSuggestions" role="listbox" aria-label="单词建议">
-                    {activePairWordSuggestions.map((w) => (
-                      <button
-                        key={w}
-                        className="pairSuggestionBtn"
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onPointerDown={(e) => e.preventDefault()}
-                        onClick={() => {
-                          const idx = activePairWordIdx
-                          if (idx === null) return
-                          setPairWords((prev) => {
-                            const next = [...prev]
-                            next[idx] = w
-                            return next
-                          })
-                          requestAnimationFrame(() => {
-                            pairWordRefs.current[Math.min(idx + 1, PAIRING_SECRET_WORD_COUNT - 1)]?.focus()
-                          })
-                        }}
-                      >
-                        {w}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="muted small">支持粘贴整段口令；也支持输入每个单词前 4 个字母。</div>
-              </label>
-              <label className="field">
-                <span>设备名称（可选）</span>
-                <input value={deviceName} onChange={(e) => setDeviceName(e.target.value)} placeholder="例如：我的手机 / 家用电脑" />
-              </label>
-
-              {pairingSas ? (
-                <div className="infoBox">
-                  <strong>Emoji 指纹：</strong>
-                  <span className="sasEmoji">{pairingSas}</span>
-                  <div className="muted small">请和旧设备上的 Emoji 指纹核对一致，再在旧设备点击“确认一致”。</div>
-                </div>
-              ) : null}
-
-              {pairingExpiresAt ? (
-                <p className="muted small">有效期至：{new Date(pairingExpiresAt).toLocaleTimeString()}</p>
-              ) : null}
-            </>
-          ) : null}
-
-        {mode === 'setup' ? (
-          <label className="field">
-            <span>设备名称（可选）</span>
-            <input value={deviceName} onChange={(e) => setDeviceName(e.target.value)} placeholder="例如：我的手机 / 家用电脑" />
-          </label>
-        ) : null}
-
-          <div className="authReminder">
-            <label className="rememberRow">
-              <input
-                type="checkbox"
-                checked={rememberUnlock}
-                onChange={(e) => {
-                  const next = e.target.checked
-                  if (next) {
-                    setConfirmRememberUnlock(true)
-                    return
-                  }
-                  setRememberUnlock(false)
-                  try {
-                    localStorage.setItem(LS_REMEMBER_UNLOCK, '0')
-                  } catch {
-                    // ignore
-                  }
-                }}
-              />
-              <span>记住解锁（14 天，谨慎开启）</span>
-            </label>
-
-            <details className="help authHelp">
-              <summary>风险说明（建议仅在个人可信设备开启）</summary>
-              <div className="helpBody">
-                <p className="muted small" style={{ margin: 0 }}>
-                  开启后会在本机保存用于快速解锁的材料；若发生 XSS/恶意扩展等同源脚本执行，攻击者可能绕过 Passkey 解锁你的保险库。
-                </p>
-              </div>
-            </details>
-          </div>
-
-        {mode === 'pair' ? (
-          <div className="row authActions">
-            <button
-              className="btn"
-              onClick={startPairing}
-              disabled={busy || !pairingTicketValid}
-              type="button"
-            >
-              1. 连接旧设备
-            </button>
-            <button className="btn primary" onClick={finishPairing} disabled={busy || !prepared || !pairingMasterKey} type="button">
-              2. 创建 Passkey 并完成
-            </button>
-          </div>
-        ) : (
-          <div className="row authActions">
-            <button className="btn primary" onClick={finish} disabled={busy || !prepared} type="button">
-              {mode === 'unlock' ? '解锁' : '完成'}
-            </button>
-            <button className="btn" onClick={prepare} disabled={busy} type="button" title="重新获取验证参数">
-              重新准备
-            </button>
-          </div>
-        )}
-
-        {mode !== 'pair' ? (
-          <p className="muted small authStatus">
-            {prepared ? '已准备就绪。' : busy ? '正在准备验证…' : '正在准备验证…（如长时间无响应，可点击“重新准备”）'}
+        {/* Header */}
+        <header className="text-center mb-8">
+          <h1 className="text-3xl font-bold tracking-tight mb-2 text-foreground">
+            {brandName.includes('Credit') ? (
+              <>
+                {brandName.replace('Credit', '')}
+                <span className="font-serif italic text-primary">Credit</span>
+              </>
+            ) : (
+              brandName
+            )}
+          </h1>
+          <p className="text-sm text-muted-foreground font-light">
+            用 Passkey 解锁你的保险库。笔记默认端到端加密，只在你的设备解密。
           </p>
-        ) : null}
+        </header>
 
-          <details className="help authHelp">
-            <summary>使用说明</summary>
-            <div className="helpBody">
-            {mode === 'unlock' ? (
-              <ul className="helpList">
-                <li>打开页面会自动准备验证参数；若长时间无响应，可点击“重新准备”。</li>
-                <li>点击“解锁”：弹出 Passkey 验证（指纹/人脸/安全钥匙）。</li>
-                <li>验证通过后进入笔记库；你的内容会在本机解密。</li>
-              </ul>
-            ) : null}
+        {/* Auth Card */}
+        <Card className="shadow-lg backdrop-blur-sm bg-background/95">
+          <CardContent className="pt-6">
+            <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)} className="w-full">
+              <TabsList className="grid w-full grid-cols-3 mb-6">
+                <TabsTrigger value="unlock" className="text-xs sm:text-sm">
+                  <KeyIcon className="size-4 mr-1.5 hidden sm:inline" />
+                  解锁
+                </TabsTrigger>
+                <TabsTrigger value="setup" className="text-xs sm:text-sm">
+                  <PlusIcon className="size-4 mr-1.5 hidden sm:inline" />
+                  创建保险库
+                </TabsTrigger>
+                <TabsTrigger value="pair" className="text-xs sm:text-sm">
+                  <LinkIcon className="size-4 mr-1.5 hidden sm:inline" />
+                  添加新设备
+                </TabsTrigger>
+              </TabsList>
 
-            {mode === 'setup' ? (
-              <ul className="helpList">
-                <li>打开页面会自动准备注册参数；若长时间无响应，可点击“重新准备”。</li>
-                <li>点击“完成”：创建 Passkey；同时在本机生成主密钥（不会上传明文）。</li>
-                <li>创建完成后进入笔记库；建议尽快在“设置”里离线备份“恢复码”（用于丢失设备时恢复）。</li>
-              </ul>
-            ) : null}
+              {/* Unlock Tab */}
+              <TabsContent value="unlock" className="space-y-4">
+                <div className="space-y-2">
+                  <h2 className="text-lg font-semibold">{title}</h2>
+                  <p className="text-sm text-muted-foreground">
+                    使用本设备的 Passkey 解锁保险库
+                  </p>
+                </div>
 
-            {mode === 'pair' ? (
-              <ul className="helpList">
-                <li>在已登录设备打开“设置”→“添加新设备”，获取一次性配对口令（{PAIRING_SECRET_WORD_COUNT} 个英文单词 + 二维码，有效期约 5 分钟）。</li>
-                <li>新设备输入/粘贴配对口令并点击“连接旧设备”（支持只输入每个单词前 4 个字母）。</li>
-                <li>两台设备会显示同一组 Emoji 指纹：请核对一致，再在旧设备点击“确认一致”。</li>
-                <li>新设备收到主密钥后，点击“创建 Passkey 并完成”。</li>
-              </ul>
-            ) : null}
+                {/* Remember unlock checkbox */}
+                <RememberUnlockSection
+                  checked={rememberUnlock}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setConfirmRememberUnlock(true)
+                    } else {
+                      setRememberUnlock(false)
+                      try {
+                        localStorage.setItem(LS_REMEMBER_UNLOCK, '0')
+                      } catch {}
+                    }
+                  }}
+                />
 
-            <p className="muted small">
-              兼容性：需要浏览器支持 WebAuthn（Passkey）及 PRF 扩展；若提示不支持，请更新浏览器或更换 Passkey 提供方。
-            </p>
-            </div>
-          </details>
+                <div className="flex gap-2 pt-2">
+                  <Button onClick={finish} disabled={busy || !prepared} className="flex-1 rounded-full shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all active:scale-95">
+                    {busy && <Spinner className="mr-1" />}
+                    解锁
+                  </Button>
+                  <Button variant="outline" onClick={prepare} disabled={busy} className="rounded-full">
+                    重新准备
+                  </Button>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  {prepared ? '已准备就绪。' : busy ? '正在准备验证…' : '正在准备验证…（如长时间无响应，可点击"重新准备"）'}
+                </p>
+
+                <HelpSection mode={mode} />
+              </TabsContent>
+
+              {/* Setup Tab */}
+              <TabsContent value="setup" className="space-y-4">
+                <div className="space-y-2">
+                  <h2 className="text-lg font-semibold">{title}</h2>
+                  <p className="text-sm text-muted-foreground">
+                    首次使用：创建保险库并绑定本设备 Passkey
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="setup-device-name">设备名称（可选）</Label>
+                  <Input
+                    id="setup-device-name"
+                    value={deviceName}
+                    onChange={(e) => setDeviceName(e.target.value)}
+                    placeholder="例如：我的手机 / 家用电脑"
+                  />
+                </div>
+
+                <RememberUnlockSection
+                  checked={rememberUnlock}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setConfirmRememberUnlock(true)
+                    } else {
+                      setRememberUnlock(false)
+                      try {
+                        localStorage.setItem(LS_REMEMBER_UNLOCK, '0')
+                      } catch {}
+                    }
+                  }}
+                />
+
+                <div className="flex gap-2 pt-2">
+                  <Button onClick={finish} disabled={busy || !prepared} className="flex-1 rounded-full shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all active:scale-95">
+                    {busy && <Spinner className="mr-1" />}
+                    完成
+                  </Button>
+                  <Button variant="outline" onClick={prepare} disabled={busy} className="rounded-full">
+                    重新准备
+                  </Button>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  {prepared ? '已准备就绪。' : busy ? '正在准备验证…' : '正在准备验证…（如长时间无响应，可点击"重新准备"）'}
+                </p>
+
+                <HelpSection mode={mode} />
+              </TabsContent>
+
+              {/* Pair Tab */}
+              <TabsContent value="pair" className="space-y-4">
+                <div className="space-y-2">
+                  <h2 className="text-lg font-semibold">{title}</h2>
+                  <p className="text-sm text-muted-foreground">
+                    从已登录设备添加新设备（配对口令 + Emoji 校验）
+                  </p>
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex gap-2">
+                  {canScanQr && (
+                    <Button variant="outline" onClick={() => setScanOpen(true)} disabled={busy} className="rounded-full">
+                      <ScanLineIcon className="size-4 mr-1.5" />
+                      扫码输入
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    onClick={() => setPairWords(Array.from({ length: PAIRING_SECRET_WORD_COUNT }, () => ''))}
+                    disabled={busy}
+                    className="rounded-full"
+                  >
+                    <TrashIcon className="size-4 mr-1.5" />
+                    清空
+                  </Button>
+                </div>
+
+                {/* Pair words grid */}
+                <div className="space-y-2">
+                  <Label>配对口令（{PAIRING_SECRET_WORD_COUNT} 个英文单词，约 5 分钟内有效）</Label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {pairWords.map((word, idx) => {
+                      const resolved = resolvePairingWord(word)
+                      const cleaned = normalizePairWordInput(word)
+                      const invalid = Boolean(cleaned) && cleaned.length >= 4 && !resolved
+                      return (
+                        <Input
+                          key={idx}
+                          ref={(el) => {
+                            pairWordRefs.current[idx] = el
+                          }}
+                          className={cn(invalid && 'border-destructive ring-destructive/20')}
+                          value={word}
+                          onChange={(e) => {
+                            const nextWord = normalizePairWordInput(e.target.value)
+                            setPairWords((prev) => {
+                              const next = [...prev]
+                              next[idx] = nextWord
+                              return next
+                            })
+                          }}
+                          onFocus={() => setActivePairWordIdx(idx)}
+                          onBlur={() => {
+                            if (!resolved || resolved === word) return
+                            setPairWords((prev) => {
+                              const next = [...prev]
+                              next[idx] = resolved
+                              return next
+                            })
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === ' ' || e.key === 'Enter') {
+                              e.preventDefault()
+                              pairWordRefs.current[Math.min(idx + 1, PAIRING_SECRET_WORD_COUNT - 1)]?.focus()
+                              return
+                            }
+                            if (e.key === 'Backspace' && !word && idx > 0) {
+                              pairWordRefs.current[idx - 1]?.focus()
+                            }
+                          }}
+                          onPaste={(e) => {
+                            const text = e.clipboardData.getData('text')
+                            if (!text) return
+
+                            const extracted = extractPairingSecretFromText(text)
+                            if (extracted) {
+                              e.preventDefault()
+                              setPairWords(splitPairingSecretWords(extracted))
+                              requestAnimationFrame(() => {
+                                pairWordRefs.current[Math.min(PAIRING_SECRET_WORD_COUNT - 1, idx + 1)]?.focus()
+                              })
+                              return
+                            }
+
+                            const words = splitPairingSecretWords(text)
+                            if (words.length <= 1) return
+                            e.preventDefault()
+                            setPairWords((prev) => {
+                              const next = [...prev]
+                              for (let i = 0; i < words.length && idx + i < PAIRING_SECRET_WORD_COUNT; i++) {
+                                next[idx + i] = words[i]
+                              }
+                              return next
+                            })
+                          }}
+                          inputMode="text"
+                          autoComplete="off"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          placeholder={`单词 ${idx + 1}`}
+                        />
+                      )
+                    })}
+                  </div>
+
+                  {/* Suggestions */}
+                  {activePairWordSuggestions.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {activePairWordSuggestions.map((w) => (
+                        <Button
+                          key={w}
+                          variant="outline"
+                          size="sm"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onPointerDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            const idx = activePairWordIdx
+                            if (idx === null) return
+                            setPairWords((prev) => {
+                              const next = [...prev]
+                              next[idx] = w
+                              return next
+                            })
+                            requestAnimationFrame(() => {
+                              pairWordRefs.current[Math.min(idx + 1, PAIRING_SECRET_WORD_COUNT - 1)]?.focus()
+                            })
+                          }}
+                        >
+                          {w}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-xs text-muted-foreground">
+                    支持粘贴整段口令；也支持输入每个单词前 4 个字母。
+                  </p>
+                </div>
+
+                {/* Device name */}
+                <div className="space-y-2">
+                  <Label htmlFor="pair-device-name">设备名称（可选）</Label>
+                  <Input
+                    id="pair-device-name"
+                    value={deviceName}
+                    onChange={(e) => setDeviceName(e.target.value)}
+                    placeholder="例如：我的手机 / 家用电脑"
+                  />
+                </div>
+
+                {/* SAS Emoji */}
+                {pairingSas && (
+                  <Alert>
+                    <InfoIcon className="size-4" />
+                    <AlertTitle>Emoji 指纹</AlertTitle>
+                    <AlertDescription>
+                      <span className="text-2xl mr-2">{pairingSas}</span>
+                      <span className="text-xs block mt-1">
+                        请和旧设备上的 Emoji 指纹核对一致，再在旧设备点击"确认一致"。
+                      </span>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {pairingExpiresAt && (
+                  <p className="text-xs text-muted-foreground">
+                    有效期至：{new Date(pairingExpiresAt).toLocaleTimeString()}
+                  </p>
+                )}
+
+                <RememberUnlockSection
+                  checked={rememberUnlock}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setConfirmRememberUnlock(true)
+                    } else {
+                      setRememberUnlock(false)
+                      try {
+                        localStorage.setItem(LS_REMEMBER_UNLOCK, '0')
+                      } catch {}
+                    }
+                  }}
+                />
+
+                <div className="flex gap-2 pt-2">
+                  <Button variant="outline" onClick={startPairing} disabled={busy || !pairingTicketValid} className="rounded-full">
+                    1. 连接旧设备
+                  </Button>
+                  <Button onClick={finishPairing} disabled={busy || !prepared || !pairingMasterKey} className="flex-1 rounded-full shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all active:scale-95">
+                    {busy && <Spinner className="mr-1" />}
+                    2. 创建 Passkey 并完成
+                  </Button>
+                </div>
+
+                <HelpSection mode={mode} />
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+
+        <div className="mt-8 text-center text-xs text-muted-foreground">
+          &copy; {new Date().getFullYear()} {brandName}. 版权所有
         </div>
-      </div>
+      </motion.div>
 
-      {scanOpen ? (
-        <div className="modalOverlay" role="presentation">
-          <div className="modal" role="dialog" aria-modal="true" aria-label="扫码输入配对口令">
-            <div className="row">
-              <strong>扫码输入配对口令</strong>
-              <button className="btn" type="button" onClick={() => setScanOpen(false)}>
-                关闭
-              </button>
-            </div>
-            <video ref={scanVideoRef} className="qrVideo" muted playsInline />
-            <p className="muted small" style={{ margin: '8px 0 0' }}>
-              请将二维码对准相机。
-            </p>
-          </div>
-        </div>
-      ) : null}
+      {/* QR Scanner Modal */}
+      <AnimatePresence>
+        {scanOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 12 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+              className="w-full max-w-md"
+            >
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle>扫码输入配对口令</CardTitle>
+                  <Button variant="outline" size="sm" onClick={() => setScanOpen(false)} className="rounded-full">
+                    关闭
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  <video ref={scanVideoRef} className="w-full max-h-[60vh] rounded-lg bg-black" muted playsInline />
+                  <p className="text-xs text-muted-foreground mt-2">请将二维码对准相机。</p>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {confirmRememberUnlock ? (
+      {/* Confirm remember unlock dialog */}
+      {confirmRememberUnlock && (
         <ConfirmDialog
-          title="开启“记住解锁”？"
+          title="开启「记住解锁」？"
           message={
             '开启后，会在本机保存用于快速解锁的材料（有效期 14 天）。\n\n如果浏览器发生同源脚本执行（XSS/恶意扩展/供应链等），攻击者可能绕过 Passkey，直接解密得到主密钥。\n\n仅建议在个人可信设备开启。确定要继续吗？'
           }
@@ -844,12 +863,110 @@ export function AuthView() {
             setRememberUnlock(true)
             try {
               localStorage.setItem(LS_REMEMBER_UNLOCK, '1')
-            } catch {
-              // ignore
-            }
+            } catch {}
           }}
         />
-      ) : null}
+      )}
+    </AuroraBackground>
+  )
+}
+
+function RememberUnlockSection({
+  checked,
+  onCheckedChange,
+}: {
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}) {
+  const [detailsOpen, setDetailsOpen] = useState(false)
+
+  return (
+    <div className="space-y-2">
+      <label className="flex items-center gap-2 text-sm cursor-pointer">
+        <Checkbox checked={checked} onChange={(e) => onCheckedChange(e.target.checked)} />
+        <span>记住解锁（14 天，谨慎开启）</span>
+      </label>
+
+      <button
+        type="button"
+        onClick={() => setDetailsOpen(!detailsOpen)}
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ChevronDownIcon className={cn('size-3 transition-transform', detailsOpen && 'rotate-180')} />
+        风险说明（建议仅在个人可信设备开启）
+      </button>
+
+      <AnimatePresence initial={false}>
+        {detailsOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="overflow-hidden text-xs text-muted-foreground bg-muted p-3 rounded-md"
+          >
+            开启后会在本机保存用于快速解锁的材料；若发生 XSS/恶意扩展等同源脚本执行，攻击者可能绕过 Passkey 解锁你的保险库。
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function HelpSection({ mode }: { mode: Mode }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="pt-2">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ChevronDownIcon className={cn('size-3 transition-transform', open && 'rotate-180')} />
+        使用说明
+      </button>
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="overflow-hidden text-xs text-muted-foreground bg-muted p-3 rounded-md mt-2 space-y-2"
+          >
+            {mode === 'unlock' && (
+              <ul className="list-disc list-inside space-y-1">
+                <li>打开页面会自动准备验证参数；若长时间无响应，可点击"重新准备"。</li>
+                <li>点击"解锁"：弹出 Passkey 验证（指纹/人脸/安全钥匙）。</li>
+                <li>验证通过后进入笔记库；你的内容会在本机解密。</li>
+              </ul>
+            )}
+
+            {mode === 'setup' && (
+              <ul className="list-disc list-inside space-y-1">
+                <li>打开页面会自动准备注册参数；若长时间无响应，可点击"重新准备"。</li>
+                <li>点击"完成"：创建 Passkey；同时在本机生成主密钥（不会上传明文）。</li>
+                <li>创建完成后进入笔记库；建议尽快在"设置"里离线备份"恢复码"。</li>
+              </ul>
+            )}
+
+            {mode === 'pair' && (
+              <ul className="list-disc list-inside space-y-1">
+                <li>在已登录设备打开"设置"→"添加新设备"，获取一次性配对口令。</li>
+                <li>新设备输入/粘贴配对口令并点击"连接旧设备"。</li>
+                <li>两台设备会显示同一组 Emoji 指纹：请核对一致，再在旧设备点击"确认一致"。</li>
+                <li>新设备收到主密钥后，点击"创建 Passkey 并完成"。</li>
+              </ul>
+            )}
+
+            <p className="mt-2">
+              兼容性：需要浏览器支持 WebAuthn（Passkey）及 PRF 扩展；若提示不支持，请更新浏览器或更换 Passkey 提供方。
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

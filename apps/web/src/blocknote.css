@@ -1,0 +1,783 @@
+/* 
+ * BlockNote 编辑器主题系统
+ * 
+ * 直接覆盖样式，使用 Tailwind v4 的 --color-xxx 变量
+ */
+
+/* ============================================
+   编辑器容器 - 全套主题变量
+   ============================================ */
+
+.bn-container[data-theming-css-variables-demo][data-color-scheme] {
+  /* 编辑器 */
+  --bn-colors-editor-text: var(--color-foreground) !important;
+  --bn-colors-editor-background: var(--color-background) !important;
+  
+  /* 菜单 */
+  --bn-colors-menu-text: var(--color-popover-foreground) !important;
+  --bn-colors-menu-background: var(--color-popover) !important;
+  
+  /* 工具提示 */
+  --bn-colors-tooltip-text: var(--color-popover-foreground) !important;
+  --bn-colors-tooltip-background: var(--color-muted) !important;
+  
+  /* 悬停状态 */
+  --bn-colors-hovered-text: var(--color-accent-foreground) !important;
+  --bn-colors-hovered-background: var(--color-accent) !important;
+  
+  /* 选中状态 */
+  --bn-colors-selected-text: var(--color-primary-foreground) !important;
+  --bn-colors-selected-background: var(--color-primary) !important;
+  
+  /* 禁用状态 */
+  --bn-colors-disabled-text: var(--color-muted-foreground) !important;
+  --bn-colors-disabled-background: var(--color-muted) !important;
+  
+  /* 边框和阴影 */
+  --bn-colors-shadow: var(--color-border) !important;
+  --bn-colors-border: var(--color-border) !important;
+  
+  /* 侧边菜单 */
+  --bn-colors-side-menu: var(--color-muted-foreground) !important;
+  
+  /* 圆角 */
+  --bn-border-radius: var(--radius-lg) !important;
+}
+
+/* 编辑器背景 */
+.bn-editor {
+  background-color: var(--color-background) !important;
+  color: var(--color-foreground) !important;
+}
+
+/*
+ * Heti typography variables are used in multiple places, including UI elements
+ * rendered in portals (e.g. BlockNote side menu via Floating UI).
+ *
+ * Define the defaults globally so portal-rendered elements can still reference
+ * these values even when they are outside `.bn-editor`.
+ */
+:root {
+  --heti-line-height: 1.8;
+  --heti-line-height-heading: 1.35;
+}
+
+/* 移动端减少编辑器内边距 */
+@media (max-width: 900px) {
+  .bn-editor {
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+  }
+  
+  .bn-block-outer {
+    margin-left: 0 !important;
+  }
+}
+
+/* ============================================
+   菜单和弹出层 (Portal 渲染)
+   ============================================ */
+
+/* 斜杠菜单、建议菜单等 */
+.bn-shadcn [role="menu"],
+.bn-shadcn [data-radix-menu-content],
+.bn-suggestion-menu,
+.bn-slash-menu {
+  background-color: var(--color-popover) !important;
+  color: var(--color-popover-foreground) !important;
+  border-color: var(--color-border) !important;
+}
+
+/* 菜单项 */
+.bn-shadcn [role="menuitem"],
+.bn-shadcn [data-radix-collection-item] {
+  color: var(--color-popover-foreground) !important;
+}
+
+/* 颜色选择菜单 - 自适应视口高度并支持滚动 */
+.bn-menu-dropdown.bn-color-picker-dropdown,
+.bn-color-picker-dropdown {
+  max-height: min(50dvh, var(--radix-dropdown-menu-content-available-height)) !important;
+  overflow-y: auto !important;
+}
+
+.bn-shadcn [data-radix-popper-content-wrapper] [role="menu"],
+.bn-shadcn [data-radix-menu-content] {
+  max-height: 120px !important;
+  overflow-y: auto !important;
+}
+
+/* 菜单项悬停 */
+.bn-shadcn [role="menuitem"]:hover,
+.bn-shadcn [role="menuitem"][data-highlighted],
+.bn-shadcn [data-radix-collection-item]:hover,
+.bn-shadcn [data-radix-collection-item][data-highlighted] {
+  background-color: var(--color-accent) !important;
+  color: var(--color-accent-foreground) !important;
+}
+
+/* 菜单分组标题 */
+.bn-shadcn [role="group"] > div:first-child,
+.bn-suggestion-menu-label {
+  color: var(--color-muted-foreground) !important;
+}
+
+/* 斜杠菜单字体稍微调小 */
+.bn-suggestion-menu .bn-suggestion-menu-item .text-base,
+.bn-slash-menu .bn-suggestion-menu-item .text-base {
+  font-size: 0.85rem !important;
+}
+
+.bn-suggestion-menu .bn-suggestion-menu-item .text-xs,
+.bn-slash-menu .bn-suggestion-menu-item .text-xs {
+  font-size: 0.7rem !important;
+}
+
+/* 斜杠菜单图标容器背景色 */
+.bn-suggestion-menu .bn-suggestion-menu-item [data-position="left"],
+.bn-slash-menu .bn-suggestion-menu-item [data-position="left"] {
+  background-color: var(--color-muted) !important;
+  border-radius: var(--radius-sm, 4px) !important;
+}
+
+/* 斜杠菜单图标颜色 */
+.bn-suggestion-menu .bn-suggestion-menu-item svg,
+.bn-slash-menu .bn-suggestion-menu-item svg {
+  color: var(--color-primary) !important;
+}
+
+/* 工具提示 */
+.bn-shadcn [role="tooltip"] {
+  background-color: var(--color-muted) !important;
+  color: var(--color-popover-foreground) !important;
+  border-color: var(--color-border) !important;
+}
+
+/* 工具栏 */
+.bn-shadcn .bn-toolbar {
+  background-color: var(--color-popover) !important;
+  border-color: var(--color-border) !important;
+}
+
+.bn-side-menu .bn-button {
+  width: 22px !important;
+  height: 22px !important;
+  min-width: 22px !important;
+  min-height: 22px !important;
+  padding: 0 !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 4px !important;
+  background-color: transparent !important;
+}
+
+.bn-side-menu .bn-button svg {
+  width: 14px !important;
+  height: 14px !important;
+  color: var(--color-primary) !important;
+}
+
+.bn-side-menu {
+  gap: 3px !important;
+  margin-right: 3px !important;
+  /* Use border-box so height includes padding */
+  box-sizing: border-box !important;
+  /* Paragraph: height = line-height × font-size */
+  height: calc(var(--heti-line-height) * 1rem) !important;
+  /* Buttons vertically centered in content area */
+  display: flex !important;
+  align-items: center !important;
+}
+
+/* Side menu button styling */
+.bn-side-menu .bn-button {
+  background: var(--muted) !important;
+}
+
+/* 
+ * Side menu heights and padding for headings.
+ * Height = padding-top + (line-height × font-size)
+ * padding-top matches block's padding-block-start
+ */
+.bn-side-menu[data-block-type="heading"][data-level="1"] {
+  height: calc(var(--heading-1-padding) + var(--heti-line-height-heading) * 1.75rem) !important;
+  padding-top: var(--heading-1-padding) !important;
+}
+
+.bn-side-menu[data-block-type="heading"][data-level="2"] {
+  height: calc(var(--heading-2-padding) + var(--heti-line-height-heading) * 1.5rem) !important;
+  padding-top: var(--heading-2-padding) !important;
+}
+
+.bn-side-menu[data-block-type="heading"][data-level="3"] {
+  height: calc(var(--heading-3-padding) + var(--heti-line-height-heading) * 1.25rem) !important;
+  padding-top: var(--heading-3-padding) !important;
+}
+
+.bn-side-menu[data-block-type="heading"][data-level="4"] {
+  height: calc(var(--heading-3-padding) + var(--heti-line-height-heading) * 1.125rem) !important;
+  padding-top: var(--heading-3-padding) !important;
+}
+
+.bn-side-menu[data-block-type="heading"][data-level="5"] {
+  height: calc(var(--heading-3-padding) + var(--heti-line-height-heading) * 1rem) !important;
+  padding-top: var(--heading-3-padding) !important;
+}
+
+.bn-side-menu[data-block-type="heading"][data-level="6"] {
+  height: calc(var(--heading-3-padding) + var(--heti-line-height-heading) * 0.875rem) !important;
+  padding-top: var(--heading-3-padding) !important;
+}
+
+/* Table block - use default height (same as paragraph) */
+.bn-side-menu[data-block-type="table"] {
+  height: calc(var(--heti-line-height) * 1rem) !important;
+}
+
+/* File block */
+.bn-side-menu[data-block-type="file"] {
+  height: 38px !important;
+}
+
+/* Audio block */
+.bn-side-menu[data-block-type="audio"] {
+  height: 60px !important;
+}
+
+/* Image/Video/File without URL (upload state) */
+.bn-side-menu[data-url="false"] {
+  height: 54px !important;
+}
+
+.bn-shadcn .bn-toolbar button {
+  color: var(--color-popover-foreground) !important;
+}
+
+.bn-shadcn .bn-toolbar button:hover {
+  background-color: var(--color-accent) !important;
+  color: var(--color-accent-foreground) !important;
+}
+
+/* 选中状态 */
+.bn-shadcn .bn-toolbar button[data-active="true"],
+.bn-shadcn .bn-toolbar button[aria-pressed="true"] {
+  background-color: var(--color-primary) !important;
+  color: var(--color-primary-foreground) !important;
+}
+
+/* 颜色选择器图标 */
+.bn-color-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  font-weight: 700;
+  font-size: 0.875em;
+  border-radius: 2px;
+}
+
+/* 文本颜色 */
+.bn-color-icon[data-text-color="gray"] { color: #9b9a97 !important; }
+.bn-color-icon[data-text-color="brown"] { color: #64473a !important; }
+.bn-color-icon[data-text-color="red"] { color: #e03e3e !important; }
+.bn-color-icon[data-text-color="orange"] { color: #d9730d !important; }
+.bn-color-icon[data-text-color="yellow"] { color: #dfab01 !important; }
+.bn-color-icon[data-text-color="green"] { color: #4d6461 !important; }
+.bn-color-icon[data-text-color="blue"] { color: #0b6e99 !important; }
+.bn-color-icon[data-text-color="purple"] { color: #6940a5 !important; }
+.bn-color-icon[data-text-color="pink"] { color: #ad1a72 !important; }
+
+/* 背景颜色 - 深色文字确保可见 */
+.bn-color-icon[data-background-color="gray"] { background-color: #ebeced !important; color: #37352f !important; }
+.bn-color-icon[data-background-color="brown"] { background-color: #e9e5e3 !important; color: #37352f !important; }
+.bn-color-icon[data-background-color="red"] { background-color: #fbe4e4 !important; color: #37352f !important; }
+.bn-color-icon[data-background-color="orange"] { background-color: #faebdd !important; color: #37352f !important; }
+.bn-color-icon[data-background-color="yellow"] { background-color: #fbf3db !important; color: #37352f !important; }
+.bn-color-icon[data-background-color="green"] { background-color: #ddedea !important; color: #37352f !important; }
+.bn-color-icon[data-background-color="blue"] { background-color: #ddebf1 !important; color: #37352f !important; }
+.bn-color-icon[data-background-color="purple"] { background-color: #eae4f2 !important; color: #37352f !important; }
+.bn-color-icon[data-background-color="pink"] { background-color: #f4dfeb !important; color: #37352f !important; }
+
+
+/* ============================================
+   额外的样式覆盖
+   ============================================ */
+
+.blocknote-wrapper {
+  width: 100%;
+  height: 100%;
+}
+
+/* 引用块 - 使用主题色作为强调 */
+.blocknote-wrapper [data-content-type="quote"] {
+  border-left-color: var(--color-primary) !important;
+}
+
+/* 代码块 */
+.blocknote-wrapper [data-content-type="codeBlock"] {
+  background-color: var(--muted) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  color: var(--foreground) !important;
+  padding: 1rem 1.2rem !important;
+  margin-block: 0.4rem !important;
+  overflow-x: auto !important;
+  white-space: pre !important;
+}
+
+/* 复选框列表 */
+.blocknote-wrapper [data-content-type="checkListItem"] input[type="checkbox"] {
+  accent-color: var(--color-primary);
+}
+
+/* 链接 */
+.blocknote-wrapper .bn-inline-content a {
+  color: var(--color-primary) !important;
+  text-decoration-color: var(--color-primary) !important;
+}
+
+/* 内联代码 */
+.blocknote-wrapper .bn-inline-content code,
+.bn-editor .bn-inline-content code {
+  background-color: var(--color-muted) !important;
+  color: var(--color-foreground) !important;
+  padding: 0.125rem 0.375rem !important;
+  border-radius: var(--radius-sm, 0.25rem) !important;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace !important;
+  font-size: 0.875em !important;
+  border: 1px solid var(--color-border) !important;
+}
+
+/* 代码块内不要使用内联代码样式 */
+.blocknote-wrapper [data-content-type="codeBlock"] code,
+.bn-editor .bn-block-content[data-content-type="codeBlock"] code {
+  background-color: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  font-size: inherit !important;
+  color: inherit !important;
+  white-space: pre !important;
+}
+
+/* 代码块内的 pre 不要额外内边距 */
+.blocknote-wrapper [data-content-type="codeBlock"] pre,
+.bn-editor .bn-block-content[data-content-type="codeBlock"] pre {
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* 占位符 */
+.blocknote-wrapper .bn-block-content .ProseMirror-placeholder::before {
+  color: var(--muted-foreground) !important;
+  opacity: 0.5;
+}
+
+/* 文本选中 */
+.blocknote-wrapper .bn-editor ::selection {
+  background-color: var(--color-primary) !important;
+  color: var(--color-primary-foreground) !important;
+  opacity: 0.3;
+}
+
+/* 滚动条 */
+.blocknote-wrapper .bn-editor::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.blocknote-wrapper .bn-editor::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.blocknote-wrapper .bn-editor::-webkit-scrollbar-thumb {
+  background: var(--color-muted);
+  border-radius: var(--radius);
+}
+
+.blocknote-wrapper .bn-editor::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted-foreground);
+}
+
+/* Firefox */
+.blocknote-wrapper .bn-editor {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-muted) transparent;
+}
+
+/* ============================================
+   赫蹏 (Heti) 风格中文排版优化
+   参考: https://github.com/sivan/heti
+   ============================================ */
+
+/* 
+ * 字体栈优化
+ * 优先使用系统中文字体，确保中英文混排美观
+ */
+.bn-editor,
+.blocknote-wrapper {
+  /* 正文字体：优先宋体/衬线字体，适合长文阅读 */
+  --heti-font-serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif", source-han-serif-sc, "Songti SC", SimSun, "华文宋体", STSong, serif;
+  /* 黑体/无衬线字体：用于标题 */
+  --heti-font-sans: "Noto Sans SC", "Source Han Sans SC", "Source Han Sans", source-han-sans-sc, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", sans-serif;
+  /* 楷体：用于引用 */
+  --heti-font-kai: "Kaiti SC", STKaiti, KaiTi, "楷体", serif;
+  /* 等宽字体 */
+  --heti-font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  
+  /* 排版参数 */
+  --heti-line-height: 1.8;           /* 行高：1.8 倍适合中文阅读 */
+  --heti-line-height-heading: 1.35; /* 标题行高 */
+  --heti-spacing-block: 0.4em;       /* 块级元素间距 */
+  --heti-spacing-heading: 1.25em;    /* 标题上边距 */
+  --heti-letter-spacing: 0.02em;     /* 正文字间距 */
+  --heti-letter-spacing-heading: 0.04em; /* 标题字间距（大字号需要更大间距） */
+}
+
+/* 编辑器正文排版 */
+.bn-editor {
+  font-family: var(--heti-font-sans) !important;
+  font-size: 1rem !important; /* Explicit base font-size for em calculations */
+  line-height: var(--heti-line-height) !important;
+  letter-spacing: var(--heti-letter-spacing) !important;
+  text-align: justify !important;
+  text-justify: inter-ideograph !important;
+  /* 优化文字渲染 */
+  -webkit-font-smoothing: antialiased !important;
+  -moz-osx-font-smoothing: grayscale !important;
+  font-feature-settings: "kern" 1, "liga" 1 !important;
+  /* 避免孤字 */
+  word-break: break-all !important;
+  overflow-wrap: break-word !important;
+  /* 标点悬挂（部分浏览器支持） */
+  hanging-punctuation: allow-end !important;
+}
+
+/* 段落样式 */
+.bn-editor .bn-block-content[data-content-type="paragraph"] {
+  margin-block-start: 0 !important;
+  margin-block-end: var(--heti-spacing-block) !important;
+}
+
+/* 
+ * Heading padding values as CSS variables.
+ * These are used by both headings and side menu for alignment.
+ */
+:root {
+  /* H1: 1.5em × 1.75rem = 42px at 16px base */
+  --heading-1-padding: calc(1.5 * 1.75rem);
+  /* H2/H3: 1.25em × respective font-size */
+  --heading-2-padding: calc(1.25 * 1.5rem);
+  --heading-3-padding: calc(1.25 * 1.25rem);
+}
+
+/* 标题通用样式 */
+.bn-editor .bn-block-content[data-content-type="heading"] {
+  font-family: var(--heti-font-sans) !important;
+  font-weight: 600 !important;
+  line-height: var(--heti-line-height-heading) !important;
+  letter-spacing: var(--heti-letter-spacing-heading) !important;
+  /* Reset default padding, we'll set specific values per level */
+  padding: 0 !important;
+  margin-block-start: 0 !important;
+  margin-block-end: 0.08em !important;
+  text-align: start !important;
+}
+
+/* 一级标题 - 使用 h1 选择器 */
+.bn-editor .bn-block-content[data-content-type="heading"] h1 {
+  font-size: 1.75rem !important; /* Use rem to avoid compounding */
+  font-weight: 700 !important;
+  letter-spacing: 0.05em !important;
+  padding: var(--heading-1-padding) 0 0 0 !important;
+}
+
+/* 二级标题 - 使用 h2 选择器 */
+.bn-editor .bn-block-content[data-content-type="heading"] h2 {
+  font-size: 1.5rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.04em !important;
+  padding: var(--heading-2-padding) 0 0 0 !important;
+}
+
+/* 三级标题 - 使用 h3 选择器 */
+.bn-editor .bn-block-content[data-content-type="heading"] h3 {
+  font-size: 1.25rem !important;
+  font-weight: 600 !important;
+  padding: var(--heading-3-padding) 0 0 0 !important;
+}
+
+/* 四级标题 */
+.bn-editor .bn-block-content[data-content-type="heading"] h4 {
+  font-size: 1.125rem !important;
+  font-weight: 600 !important;
+  padding: var(--heading-3-padding) 0 0 0 !important; /* Same as H3 */
+}
+
+/* 五级标题 */
+.bn-editor .bn-block-content[data-content-type="heading"] h5 {
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  padding: var(--heading-3-padding) 0 0 0 !important; /* Same as H3 */
+}
+
+/* 六级标题 */
+.bn-editor .bn-block-content[data-content-type="heading"] h6 {
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  padding: var(--heading-3-padding) 0 0 0 !important; /* Same as H3 */
+}
+
+/* 
+ * Toggle 按钮位置修复 - 和第一行居中对齐
+ * 普通内容（非 heading）使用 align-items: center 居中
+ * heading 由于有 padding-top，需要额外的 margin-top
+ */
+
+/* 普通 toggle - 居中对齐 */
+.bn-editor .bn-toggle-wrapper:not(:has(> h1)):not(:has(> h2)):not(:has(> h3)):not(:has(> h4)):not(:has(> h5)):not(:has(> h6)) {
+  align-items: center !important;
+}
+
+/* Heading toggle - 顶部对齐后用 margin-top 偏移 */
+.bn-editor .bn-toggle-wrapper:has(> h1),
+.bn-editor .bn-toggle-wrapper:has(> h2),
+.bn-editor .bn-toggle-wrapper:has(> h3),
+.bn-editor .bn-toggle-wrapper:has(> h4),
+.bn-editor .bn-toggle-wrapper:has(> h5),
+.bn-editor .bn-toggle-wrapper:has(> h6) {
+  align-items: flex-start !important;
+}
+
+/* Toggle heading h1 - line-height 1.35 × 1.75rem ≈ 37.8px */
+.bn-editor .bn-toggle-wrapper:has(> h1) .bn-toggle-button {
+  margin-top: calc(var(--heading-1-padding) + (var(--heti-line-height-heading) * 1.75rem - 30px) / 2) !important;
+}
+
+/* Toggle heading h2 - line-height 1.35 × 1.5rem ≈ 32.4px */
+.bn-editor .bn-toggle-wrapper:has(> h2) .bn-toggle-button {
+  margin-top: calc(var(--heading-2-padding) + (var(--heti-line-height-heading) * 1.5rem - 30px) / 2) !important;
+}
+
+/* Toggle heading h3 - line-height 1.35 × 1.25rem ≈ 27px */
+.bn-editor .bn-toggle-wrapper:has(> h3) .bn-toggle-button {
+  margin-top: calc(var(--heading-3-padding) + (var(--heti-line-height-heading) * 1.25rem - 30px) / 2) !important;
+}
+
+/* Toggle heading h4 - line-height 1.35 × 1.125rem ≈ 24.3px */
+.bn-editor .bn-toggle-wrapper:has(> h4) .bn-toggle-button {
+  margin-top: calc(var(--heading-3-padding) + (var(--heti-line-height-heading) * 1.125rem - 30px) / 2) !important;
+}
+
+/* Toggle heading h5 - line-height 1.35 × 1rem ≈ 21.6px */
+.bn-editor .bn-toggle-wrapper:has(> h5) .bn-toggle-button {
+  margin-top: calc(var(--heading-3-padding) + (var(--heti-line-height-heading) * 1rem - 30px) / 2) !important;
+}
+
+/* Toggle heading h6 - line-height 1.35 × 0.875rem ≈ 18.9px */
+.bn-editor .bn-toggle-wrapper:has(> h6) .bn-toggle-button {
+  margin-top: calc(var(--heading-3-padding) + (var(--heti-line-height-heading) * 0.875rem - 30px) / 2) !important;
+}
+
+/* 列表样式优化 */
+.bn-editor .bn-block-content[data-content-type="bulletListItem"],
+.bn-editor .bn-block-content[data-content-type="numberedListItem"] {
+  margin-block-end: 0.5em !important;
+}
+
+/* 列表项标记 */
+.bn-editor .bn-block-content[data-content-type="bulletListItem"]::marker {
+  color: var(--color-primary) !important;
+}
+
+/* 代码块 - 等宽字体 */
+.bn-editor .bn-block-content[data-content-type="codeBlock"],
+.blocknote-wrapper [data-content-type="codeBlock"] {
+  font-family: var(--heti-font-mono) !important;
+  font-size: 0.875em !important;
+  line-height: 1.6 !important;
+  letter-spacing: 0 !important;
+  tab-size: 2 !important;
+}
+
+/* 内联代码优化 */
+.blocknote-wrapper .bn-inline-content code,
+.bn-editor .bn-inline-content code {
+  font-family: var(--heti-font-mono) !important;
+  font-size: 0.875em !important;
+  letter-spacing: 0 !important;
+  padding: 0.15em 0.4em !important;
+  border-radius: 4px !important;
+  background-color: var(--color-muted) !important;
+  border: 1px solid var(--color-border) !important;
+  /* 避免代码换行 */
+  white-space: nowrap !important;
+}
+
+/* 强调文本 */
+.bn-editor strong,
+.bn-editor b {
+  font-weight: 600 !important;
+}
+
+/* 斜体 - 中文使用楷体代替 */
+.bn-editor em,
+.bn-editor i {
+  font-family: var(--heti-font-kai) !important;
+  font-style: normal !important;
+}
+
+/* 链接样式 */
+.bn-editor a,
+.blocknote-wrapper .bn-inline-content a {
+  color: var(--color-primary) !important;
+  text-decoration: underline !important;
+  text-decoration-color: var(--color-primary) !important;
+  text-underline-offset: 0.18em !important;
+  text-decoration-thickness: 1px !important;
+}
+
+.bn-editor a:hover,
+.blocknote-wrapper .bn-inline-content a:hover {
+  text-decoration-color: var(--color-primary) !important;
+  opacity: 0.8 !important;
+}
+
+/* 删除线 */
+.bn-editor del,
+.bn-editor s {
+  text-decoration: line-through !important;
+  text-decoration-color: var(--color-muted-foreground) !important;
+  opacity: 0.7 !important;
+}
+
+/* 下划线 - 用于专名号 */
+.bn-editor u {
+  text-decoration: underline !important;
+  text-decoration-style: solid !important;
+  text-decoration-color: var(--color-muted-foreground) !important;
+  text-decoration-thickness: 0.12em !important;
+  text-underline-offset: 0.18em !important;
+}
+
+/* 标记/高亮 */
+.bn-editor mark {
+  background-color: color-mix(in oklch, var(--color-chart-4), transparent 70%) !important;
+  padding: 0.1em 0.2em !important;
+  border-radius: 2px !important;
+}
+
+/* 表格样式 */
+.bn-editor table {
+  border-collapse: collapse !important;
+  width: 100% !important;
+  margin-block: var(--heti-spacing-block) !important;
+  font-size: 0.9375em !important;
+}
+
+.bn-editor th,
+.bn-editor td {
+  border: 1px solid var(--color-border) !important;
+  padding: 0.625em 0.875em !important;
+  text-align: start !important;
+}
+
+.bn-editor th {
+  font-family: var(--heti-font-sans) !important;
+  font-weight: 600 !important;
+  background-color: var(--color-muted) !important;
+}
+
+/* 图片样式 */
+.bn-editor img {
+  max-width: 100% !important;
+  height: auto !important;
+  border-radius: var(--radius) !important;
+  margin-block: var(--heti-spacing-block) !important;
+}
+
+/* 图片说明 */
+.bn-editor figcaption,
+.bn-editor .bn-image-caption {
+  font-family: var(--heti-font-sans) !important;
+  font-size: 0.875em !important;
+  color: var(--color-muted-foreground) !important;
+  text-align: center !important;
+  margin-top: 0.5em !important;
+}
+
+/* 分割线 */
+.bn-editor hr {
+  border: none !important;
+  border-top: 1px solid var(--color-border) !important;
+  margin-block: calc(var(--heti-spacing-block) * 1.5) !important;
+}
+
+/* 
+ * 标点优化
+ * 使用 font-feature-settings 启用标点压缩
+ */
+.bn-editor {
+  font-feature-settings: "kern" 1, "liga" 1, "halt" 1 !important;
+}
+
+/* 
+ * 首行缩进（可选，默认关闭）
+ * 如需启用，添加 .heti-indent 类到容器
+ */
+.blocknote-wrapper.heti-indent .bn-editor .bn-block-content[data-content-type="paragraph"] {
+  text-indent: 2em !important;
+}
+
+/* 
+ * 古文/竖排模式（可选）
+ * 如需启用，添加 .heti-vertical 类到容器
+ */
+.blocknote-wrapper.heti-vertical .bn-editor {
+  writing-mode: vertical-rl !important;
+  text-orientation: mixed !important;
+}
+
+/* 
+ * 打印优化
+ */
+@media print {
+  .bn-editor {
+    font-size: 12pt !important;
+    line-height: 1.75 !important;
+    color: #000 !important;
+    background: #fff !important;
+  }
+  
+  .bn-editor .bn-block-content[data-content-type="heading"] {
+    page-break-after: avoid !important;
+  }
+  
+  .bn-editor .bn-block-content[data-content-type="paragraph"] {
+    orphans: 3 !important;
+    widows: 3 !important;
+  }
+}
+
+/* 
+ * 响应式排版
+ */
+@media (max-width: 640px) {
+  .bn-editor {
+    font-size: 15px !important;
+    line-height: 1.75 !important;
+    letter-spacing: 0.01em !important;
+  }
+  
+  .bn-editor .bn-block-content[data-content-type="heading"][data-level="1"] {
+    font-size: 1.5em !important;
+  }
+  
+  .bn-editor .bn-block-content[data-content-type="heading"][data-level="2"] {
+    font-size: 1.3em !important;
+  }
+  
+  .bn-editor .bn-block-content[data-content-type="heading"][data-level="3"] {
+    font-size: 1.15em !important;
+  }
+}

@@ -1,17 +1,21 @@
 {
   "name": "inkrypt",
   "private": true,
-  "workspaces": [
-    "apps/*"
-  ],
   "scripts": {
-    "dev": "concurrently -n worker,web -c blue,green \"npm:dev:worker\" \"npm:dev:web\"",
-    "dev:web": "npm --workspace apps/web run dev",
-    "dev:worker": "npm --workspace apps/worker run dev",
-    "build": "npm --workspace apps/worker run build && npm --workspace apps/web run build",
-    "typecheck": "npm --workspace apps/worker run typecheck && npm --workspace apps/web run typecheck"
+    "dev": "concurrently -n worker,web -c blue,green \"pnpm:dev:worker\" \"pnpm:dev:web\"",
+    "dev:web": "pnpm --filter @inkrypt/web run dev",
+    "dev:worker": "pnpm --filter @inkrypt/worker run dev",
+    "build": "pnpm --filter @inkrypt/worker run build && pnpm --filter @inkrypt/web run build",
+    "typecheck": "pnpm --filter @inkrypt/worker run typecheck && pnpm --filter @inkrypt/web run typecheck",
+    "test": "pnpm --filter @inkrypt/web run test"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "jsdom": "^27.3.0"
+  },
+  "dependencies": {
+    "@radix-ui/react-alert-dialog": "^1.1.15",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-separator": "^1.1.8"
   }
 }

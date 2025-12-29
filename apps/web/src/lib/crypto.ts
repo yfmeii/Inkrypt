@@ -12,18 +12,6 @@ export function bytesToHex(bytes: Uint8Array): string {
     .join('')
 }
 
-export function hexToBytes(hex: string): Bytes {
-  const normalized = hex.trim().toLowerCase()
-  if (!/^[0-9a-f]*$/.test(normalized) || normalized.length % 2 !== 0) {
-    throw new Error('无效的 Hex 字符串')
-  }
-  const bytes = new Uint8Array(normalized.length / 2)
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(normalized.slice(i * 2, i * 2 + 2), 16)
-  }
-  return bytes as Bytes
-}
-
 export function bytesToBase64(bytes: Uint8Array): string {
   const chunkSize = 0x8000
   let binary = ''
@@ -103,9 +91,14 @@ export type NotePayload = {
     created_at: number
     tags: string[]
     is_favorite: boolean
+    updatedAtClient?: number
+    updatedBy?: string
   }
   content: string
   attachments: Record<string, string>
+  format?: 'blocknote+yjs-v1'
+  yjsSnapshotB64?: string
+  syncNonce?: string
 }
 
 export function noteAad(noteId: string): Bytes {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Loader2Icon } from 'lucide-react'
 import { useInkryptStore } from './state/store'
 import { extractPairingSecretFromText } from './lib/pairingSecret'
 import { AuthView } from './views/AuthView'
@@ -54,8 +55,8 @@ export function App() {
   if (hydrating) {
     return (
       <div className="appBoot" aria-busy="true" aria-label="正在恢复上次会话">
-        <span className="spinner" aria-hidden="true" />
-        <span>正在恢复上次会话…</span>
+        <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
+        <span className="text-muted-foreground">正在恢复上次会话…</span>
       </div>
     )
   }

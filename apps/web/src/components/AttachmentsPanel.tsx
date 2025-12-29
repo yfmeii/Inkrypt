@@ -1,5 +1,6 @@
 import type { ChangeEvent, DragEvent } from 'react'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import { estimateDataUrlBytes, formatBytes, getDataUrlMime } from '../lib/attachments'
 import { useFocusTrap } from '../lib/focusTrap'
 import { useBodyScrollLock } from '../lib/scrollLock'
@@ -201,7 +202,7 @@ export function AttachmentsPanel({
             e.preventDefault()
             if (isBusy) e.dataTransfer.dropEffect = 'none'
           }}
-          onDragLeave={(e) => {
+          onDragLeave={() => {
             if (!dragDepthRef.current) return
             dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
             if (dragDepthRef.current === 0) setDragOver(false)
@@ -280,44 +281,53 @@ export function AttachmentsPanel({
         </div>
       </div>
 
-      {preview ? (
-        <div
-          className="modalOverlay"
-          role="presentation"
-          onClick={(e) => {
-            e.stopPropagation()
-            setPreview(null)
-          }}
-        >
-          <div
-            className="modal card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={previewTitleId}
-            onClick={(e) => e.stopPropagation()}
-            ref={previewModalRef}
-            tabIndex={-1}
+      <AnimatePresence>
+        {preview ? (
+          <motion.div
+            className="modalOverlay"
+            role="presentation"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={(e) => {
+              e.stopPropagation()
+              setPreview(null)
+            }}
           >
-            <div className="row">
-              <strong id={previewTitleId}>预览</strong>
-              <button className="btn" type="button" onClick={() => setPreview(null)} aria-label="关闭预览">
-                关闭
-              </button>
-            </div>
-            <div className="attachmentPreviewBox">
-              <img className="attachmentPreviewImg" src={preview.dataUrl} alt={preview.name} />
-            </div>
-            <div className="row">
-              <span className="attachmentPreviewName muted small" title={preview.name}>
-                {preview.name}
-              </span>
-              <button className="btn primary" type="button" onClick={() => onDownload(preview.name)} disabled={isBusy}>
-                下载
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+            <motion.div
+              className="modal card"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={previewTitleId}
+              onClick={(e) => e.stopPropagation()}
+              ref={previewModalRef}
+              tabIndex={-1}
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 12 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+            >
+              <div className="row">
+                <strong id={previewTitleId}>预览</strong>
+                <button className="btn" type="button" onClick={() => setPreview(null)} aria-label="关闭预览">
+                  关闭
+                </button>
+              </div>
+              <div className="attachmentPreviewBox">
+                <img className="attachmentPreviewImg" src={preview.dataUrl} alt={preview.name} />
+              </div>
+              <div className="row">
+                <span className="attachmentPreviewName muted small" title={preview.name}>
+                  {preview.name}
+                </span>
+                <button className="btn primary" type="button" onClick={() => onDownload(preview.name)} disabled={isBusy}>
+                  下载
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   )
 }

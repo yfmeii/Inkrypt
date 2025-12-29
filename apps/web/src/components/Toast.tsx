@@ -1,10 +1,16 @@
 import type { ReactNode } from 'react'
+import { XIcon, Loader2Icon, AlertCircleIcon, InfoIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 export type ToastKind = 'error' | 'info' | 'loading'
 
 export function ToastStack({ children }: { children: ReactNode }) {
   return (
-    <div className="toastStack" aria-live="polite" aria-relevant="additions text">
+    <div
+      className="fixed top-3 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-[min(780px,calc(100%-24px))] pointer-events-none"
+      aria-live="polite"
+      aria-relevant="additions text"
+    >
       {children}
     </div>
   )
@@ -20,19 +26,37 @@ export function Toast({
   onClose?: () => void
 }) {
   return (
-    <div className={`toast ${kind}`} role={kind === 'error' ? 'alert' : undefined}>
-      <div className="toastBody">
-        {kind === 'loading' ? <span className="spinner" aria-hidden="true" /> : null}
-        <div className="toastMessage">{message}</div>
+    <div
+      className={cn(
+        'pointer-events-auto rounded-lg px-4 py-3 flex items-start justify-between gap-3 shadow-lg border',
+        kind === 'error' && 'bg-destructive/10 border-destructive/20 text-destructive',
+        kind === 'info' && 'bg-secondary border-border text-secondary-foreground',
+        kind === 'loading' && 'bg-card border-border text-card-foreground'
+      )}
+      role={kind === 'error' ? 'alert' : undefined}
+    >
+      <div className="flex gap-2.5 items-start min-w-0">
+        {kind === 'loading' && (
+          <Loader2Icon className="size-4 animate-spin shrink-0 mt-0.5" />
+        )}
+        {kind === 'error' && (
+          <AlertCircleIcon className="size-4 shrink-0 mt-0.5" />
+        )}
+        {kind === 'info' && (
+          <InfoIcon className="size-4 shrink-0 mt-0.5" />
+        )}
+        <div className="text-sm whitespace-pre-wrap break-words">{message}</div>
       </div>
-      {onClose ? (
-        <button className="toastClose" type="button" onClick={onClose} aria-label="关闭" title="关闭">
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" />
-          </svg>
+      {onClose && (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="关闭"
+          className="rounded-md p-1 opacity-70 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/10 transition-opacity shrink-0"
+        >
+          <XIcon className="size-4" />
         </button>
-      ) : null}
+      )}
     </div>
   )
 }
-

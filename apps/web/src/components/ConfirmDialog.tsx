@@ -1,7 +1,15 @@
-import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
-import { useEffect, useId, useRef } from 'react'
-import { useFocusTrap } from '../lib/focusTrap'
-import { useBodyScrollLock } from '../lib/scrollLock'
+import { useEffect, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+
+const CLOSE_ANIMATION_MS = 200
 
 export function ConfirmDialog({
   title,
@@ -22,56 +30,63 @@ export function ConfirmDialog({
   onConfirm: () => void
   onCancel: () => void
 }) {
-  const titleId = useId()
-  const messageId = useId()
-  const modalRef = useRef<HTMLDivElement | null>(null)
-
-  useFocusTrap(modalRef, true)
-  useBodyScrollLock(true)
+  const [open, setOpen] = useState(true)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closingRef = useRef(false)
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel()
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+      }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onCancel])
+  }, [])
 
-  const onOverlayPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    e.stopPropagation()
-    if (!closeOnOverlay) return
-    onCancel()
-  }
-
-  const onOverlayClick = (e: ReactMouseEvent<HTMLDivElement>) => {
-    e.stopPropagation()
+  const closeWith = (callback: () => void) => {
+    if (closingRef.current) return
+    closingRef.current = true
+    setOpen(false)
+    timeoutRef.current = setTimeout(() => {
+      callback()
+    }, CLOSE_ANIMATION_MS)
   }
 
   return (
-    <div className="modalOverlay" role="presentation" onPointerDown={onOverlayPointerDown} onClick={onOverlayClick}>
-      <div
-        className="modal card confirmDialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={messageId}
-        onPointerDown={(e) => e.stopPropagation()}
-        ref={modalRef}
-        tabIndex={-1}
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          closeWith(onCancel)
+        }
+      }}
+    >
+      <DialogContent
+        className="sm:max-w-[425px]"
+        onPointerDownOutside={(e) => {
+          if (!closeOnOverlay) {
+            e.preventDefault()
+          }
+        }}
+        onEscapeKeyDown={() => closeWith(onCancel)}
       >
-        <strong id={titleId} className="confirmDialogTitle">{title}</strong>
-        <p id={messageId} className="confirmDialogMessage muted">
-          {message}
-        </p>
-        <div className="confirmDialogActions">
-          <button className="btn" type="button" onClick={onCancel}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription className="whitespace-pre-wrap">
+            {message}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button variant="outline" onClick={() => closeWith(onCancel)}>
             {cancelText}
-          </button>
-          <button className={confirmVariant === 'danger' ? 'btn danger' : 'btn primary'} type="button" onClick={onConfirm}>
+          </Button>
+          <Button
+            variant={confirmVariant === 'danger' ? 'destructive' : 'default'}
+            onClick={() => closeWith(onConfirm)}
+          >
             {confirmText}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

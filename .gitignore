@@ -1,6 +1,10 @@
 # dependencies
 node_modules/
 
+# macOS
+.DS_Store
+**/.DS_Store
+
 # builds
 dist/
 apps/**/dist/
