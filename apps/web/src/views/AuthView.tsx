@@ -65,6 +65,11 @@ export function AuthView() {
   const pairingPrefillSecret = useInkryptStore((s) => s.pairingPrefillSecret)
   const consumePairingPrefillSecret = useInkryptStore((s) => s.consumePairingPrefillSecret)
 
+  // 更新浏览器标题为自定义显示名称
+  useEffect(() => {
+    document.title = brandName
+  }, [brandName])
+
   const [mode, setMode] = useState<Mode>('unlock')
   const [deviceName, setDeviceName] = useState('')
   const [pairWords, setPairWords] = useState<string[]>(() => Array.from({ length: PAIRING_SECRET_WORD_COUNT }, () => ''))

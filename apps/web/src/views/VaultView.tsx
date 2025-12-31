@@ -298,6 +298,14 @@ export function VaultView() {
     [notes, selectedNoteId],
   )
 
+  // 更新浏览器标题为自定义显示名称
+  useEffect(() => {
+    document.title = brandName
+    return () => {
+      document.title = 'Inkrypt'
+    }
+  }, [brandName])
+
   useEffect(() => {
     const createdAt = selectedBaseline?.meta.created_at ?? selected?.payload.meta.created_at ?? Date.now()
     draftStateRef.current = {
