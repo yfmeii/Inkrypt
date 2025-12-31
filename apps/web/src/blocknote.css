@@ -797,7 +797,8 @@
  */
 @media (max-width: 640px) {
   .bn-editor {
-    font-size: 15px !important;
+    /* iOS Safari 会在字体小于 16px 时自动缩放输入框，保持 16px 避免此问题 */
+    font-size: 16px !important;
     line-height: 1.75 !important;
     letter-spacing: 0.01em !important;
   }
