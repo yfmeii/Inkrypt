@@ -524,7 +524,7 @@ export function VaultView() {
     const tags = note.payload.meta.tags.join(', ').toLowerCase()
     if (tags.includes(searchQueryLower)) return 'tags'
 
-    const content = (note.payload.content || '').toLowerCase()
+    const content = extractPlainText(note.payload.content || '').toLowerCase()
     if (content.includes(searchQueryLower)) return 'content'
 
     return null
@@ -861,6 +861,7 @@ export function VaultView() {
         const titleRaw = n.payload.meta.title || ''
         const tagsRaw = n.payload.meta.tags.join(' ')
         const contentRaw = n.payload.content || ''
+        const contentPlain = extractPlainText(contentRaw)
 
         const title = useNorm ? normalizeSearchText(titleRaw) : titleRaw.toLowerCase()
         let score = 0
@@ -869,7 +870,7 @@ export function VaultView() {
           const tags = useNorm ? normalizeSearchText(tagsRaw) : tagsRaw.toLowerCase()
           if (tags.includes(needle)) score = 2
           else {
-            const content = useNorm ? normalizeSearchText(contentRaw) : contentRaw.toLowerCase()
+            const content = useNorm ? normalizeSearchText(contentPlain) : contentPlain.toLowerCase()
             if (content.includes(needle)) score = 1
           }
         }

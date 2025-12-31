@@ -11,6 +11,17 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { BlockNoteComponent } from './BlockNote'
 import * as converter from '../lib/blocknote/converter'
 
+vi.mock('@blocknote/core', () => ({
+  BlockNoteSchema: { create: vi.fn(() => ({})) },
+  defaultBlockSpecs: {},
+  defaultInlineContentSpecs: {},
+  defaultStyleSpecs: {},
+}))
+
+vi.mock('@blocknote/core/extensions', () => ({
+  SideMenuExtension: {},
+}))
+
 // Mock BlockNote hooks and components
 vi.mock('@blocknote/react', () => ({
   useCreateBlockNote: vi.fn(() => ({
@@ -26,6 +37,7 @@ vi.mock('@blocknote/react', () => ({
   useBlockNoteEditor: vi.fn(() => ({
     document: [],
     removeBlocks: vi.fn(),
+    getActiveStyles: vi.fn(() => ({})),
   })),
   useComponentsContext: vi.fn(() => ({
     Generic: {
@@ -36,6 +48,11 @@ vi.mock('@blocknote/react', () => ({
       },
     },
     SideMenu: { Button: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button> },
+    FormattingToolbar: {
+      Button: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
+      Root: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+      Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    },
   })),
   useDictionary: vi.fn(() => ({ side_menu_drag_handle_label: 'drag' })),
   useExtension: vi.fn(() => ({
@@ -61,6 +78,12 @@ vi.mock('@blocknote/react', () => ({
   SideMenu: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   AddBlockButton: () => null,
   DragHandleMenu: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  useActiveStyles: vi.fn(() => ({})),
+  createReactStyleSpec: vi.fn((config, impl) => ({ config, implementation: impl })),
+  BlockNoteSchema: { create: vi.fn(() => ({})) },
+  defaultBlockSpecs: {},
+  defaultInlineContentSpecs: {},
+  defaultStyleSpecs: {},
 }))
 
 vi.mock('@blocknote/shadcn', () => ({

@@ -1055,6 +1055,25 @@
   cursor: not-allowed;
 }
 
+/* iOS Safari auto-zooms on focus when form control font-size < 16px. */
+@media (max-width: 767px) and (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  /* iOS can also auto-zoom on contenteditable when computed font-size < 16px. */
+  [contenteditable="true"] {
+    font-size: 16px !important;
+  }
+
+  /* Ensure the editor wrapper never ends up below 16px on mobile. */
+  .contentInput {
+    font-size: 16px !important;
+  }
+}
+
 /* Content Editor Textarea */
 .contentInput {
   flex: 1;

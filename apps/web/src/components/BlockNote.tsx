@@ -3,7 +3,7 @@
  */
 
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle, useMemo, useState } from 'react'
-import { useCreateBlockNote, useBlockNoteEditor, useComponentsContext, useDictionary, useExtension, useExtensionState } from '@blocknote/react'
+import { useCreateBlockNote, useBlockNoteEditor, useComponentsContext, useDictionary, useExtension, useExtensionState, createReactStyleSpec, useActiveStyles } from '@blocknote/react'
 import { BlockNoteView, ShadCNDefaultComponents } from '@blocknote/shadcn'
 import type { ShadCNComponents } from '@blocknote/shadcn'
 import {
@@ -22,10 +22,11 @@ import {
   DragHandleMenu,
   SideMenuProps,
 } from '@blocknote/react'
+import { BlockNoteSchema, defaultStyleSpecs, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core'
 import { SideMenuExtension } from '@blocknote/core/extensions'
 import { 
   Text, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
-  List, ListOrdered, CheckSquare, Code, Image, Video, FileAudio, File, Table, Quote, Trash2,
+  List, ListOrdered, CheckSquare, Code, Image, Video, FileAudio, File, Table, Quote, Trash2, EyeOff,
 } from 'lucide-react'
 import { zh } from '@blocknote/core/locales'
 import type { BlockNoteEditor } from '@blocknote/core'
@@ -50,6 +51,123 @@ import '../blocknote.css'
 import { markdownToBlocks, blocksToMarkdown } from '../lib/blocknote/converter'
 import { useInkryptStore } from '../state/store'
 import { YjsBlockNoteBinding } from '../lib/yjs/blockNoteBinding'
+
+// ============================================
+// Blur Style - 模糊块功能
+// ============================================
+
+/**
+ * 全局显示状态注册表
+ * 用于同步相同 blurId 的模糊块的显示状态
+ * 注意：此状态不持久化，刷新页面后重置
+ */
+const blurRevealRegistry = new Map<string, Set<(revealed: boolean) => void>>()
+
+function subscribeBlurReveal(blurId: string, callback: (revealed: boolean) => void) {
+  if (!blurRevealRegistry.has(blurId)) {
+    blurRevealRegistry.set(blurId, new Set())
+  }
+  blurRevealRegistry.get(blurId)!.add(callback)
+  return () => {
+    blurRevealRegistry.get(blurId)?.delete(callback)
+    if (blurRevealRegistry.get(blurId)?.size === 0) {
+      blurRevealRegistry.delete(blurId)
+    }
+  }
+}
+
+function notifyBlurReveal(blurId: string, revealed: boolean) {
+  blurRevealRegistry.get(blurId)?.forEach(cb => cb(revealed))
+}
+
+/**
+ * 模糊样式规范
+ * 值为 blurId，用于同步显示状态
+ */
+const BlurStyleSpec = createReactStyleSpec(
+  {
+    type: 'blur',
+    propSchema: 'string', // blurId
+  },
+  {
+    render: (props) => {
+      const [revealed, setRevealed] = useState(false)
+      const blurId = props.value || crypto.randomUUID()
+
+      useEffect(() => {
+        // 订阅同 blurId 的显示状态变化
+        const unsubscribe = subscribeBlurReveal(blurId, setRevealed)
+        return unsubscribe
+      }, [blurId])
+
+      const handleClick = (e: React.MouseEvent) => {
+        e.stopPropagation()
+        const newRevealed = !revealed
+        setRevealed(newRevealed)
+        notifyBlurReveal(blurId, newRevealed)
+      }
+
+      return (
+        <span
+          className="bn-inline-blur"
+          data-revealed={revealed}
+          onClick={handleClick}
+          title={revealed ? '点击隐藏' : '点击显示'}
+        >
+          <span className="bn-inline-blur-content" ref={props.contentRef} />
+        </span>
+      )
+    },
+  }
+)
+
+/**
+ * 自定义 schema，包含模糊样式
+ */
+const customSchema = BlockNoteSchema.create({
+  blockSpecs: defaultBlockSpecs,
+  inlineContentSpecs: defaultInlineContentSpecs,
+  styleSpecs: {
+    ...defaultStyleSpecs,
+    blur: BlurStyleSpec,
+  },
+})
+
+// 自定义 schema 类型
+type CustomSchemaType = typeof customSchema
+
+/**
+ * 模糊样式工具栏按钮
+ */
+function BlurStyleButton() {
+  // 使用 any 类型绕过 BlockNote 的复杂类型推断
+  const editor = useBlockNoteEditor() as BlockNoteEditor<CustomSchemaType['blockSchema'], CustomSchemaType['inlineContentSchema'], CustomSchemaType['styleSchema']>
+  const Components = useComponentsContext()!
+  const activeStyles = useActiveStyles() as { blur?: string; [key: string]: unknown }
+  
+  const isActive = !!activeStyles.blur
+  
+  const handleClick = useCallback(() => {
+    if (isActive) {
+      // 移除模糊样式
+      ;(editor as any).removeStyles({ blur: activeStyles.blur })
+    } else {
+      // 添加模糊样式，使用新的 blurId
+      const blurId = crypto.randomUUID()
+      ;(editor as any).addStyles({ blur: blurId })
+    }
+  }, [editor, isActive, activeStyles.blur])
+  
+  return (
+    <Components.FormattingToolbar.Button
+      mainTooltip="模糊 (隐藏敏感内容)"
+      onClick={handleClick}
+      isSelected={isActive}
+    >
+      <EyeOff size={16} />
+    </Components.FormattingToolbar.Button>
+  )
+}
 
 function getBlockTypeIcon(blockType: string, level?: number) {
   const iconSize = 18
@@ -267,6 +385,7 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
     const yjsBindingRef = useRef<YjsBlockNoteBinding | null>(null)
 
     const editor = useCreateBlockNote({
+      schema: customSchema,
       uploadFile: createAttachmentUploader(onAddAttachmentRef),
       resolveFileUrl: async (url: string) => resolveAttachmentUrl(url, attachmentsRef.current),
       dictionary,
@@ -415,6 +534,7 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
               <BasicTextStyleButton basicTextStyle="underline" key="underlineStyleButton" />
               <BasicTextStyleButton basicTextStyle="strike" key="strikeStyleButton" />
               <BasicTextStyleButton basicTextStyle="code" key="codeStyleButton" />
+              <BlurStyleButton key="blurStyleButton" />
               <TextAlignButton textAlignment="left" key="textAlignLeftButton" />
               <TextAlignButton textAlignment="center" key="textAlignCenterButton" />
               <TextAlignButton textAlignment="right" key="textAlignRightButton" />

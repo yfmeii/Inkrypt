@@ -313,6 +313,39 @@
   border-left-color: var(--color-primary) !important;
 }
 
+/* Blur block - square, click-to-reveal mask */
+.bn-inline-blur {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0;
+  cursor: pointer;
+  padding: 0 2px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.bn-inline-blur-content {
+  display: inline;
+  transition: filter 0.2s ease, opacity 0.2s ease;
+}
+
+.bn-inline-blur[data-revealed="false"] .bn-inline-blur-content {
+  filter: blur(10px);
+  opacity: 1;
+  background: transparent;
+}
+
+.bn-inline-blur[data-revealed="false"] {
+  background: color-mix(in oklch, var(--background), var(--muted) 10%);
+  border-style: dashed;
+}
+
+.bn-inline-blur[data-revealed="true"] {
+  background: transparent;
+  border-style: solid;
+}
+
 /* 代码块 */
 .blocknote-wrapper [data-content-type="codeBlock"] {
   background-color: var(--muted) !important;

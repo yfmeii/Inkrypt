@@ -32,3 +32,4 @@ apps/worker/.dev.vars
 # local public mirror
 Inkrypt-Public/
 
+.ace-tool/

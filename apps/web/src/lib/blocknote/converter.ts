@@ -60,7 +60,5 @@ export async function markdownToBlocks(
  * @returns 带前缀的 JSON 字符串
  */
 export function blocksToMarkdown(blocks: Block[]): string {
-  // 使用 JSON 格式保存，保留所有格式信息
-  const json = JSON.stringify(blocks)
-  return JSON_PREFIX + json
+  return JSON_PREFIX + JSON.stringify(blocks)
 }

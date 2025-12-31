@@ -80,7 +80,8 @@ export function extractPlainText(content: string): string {
         return extractTextFromBlocks(blocks)
       }
     } catch {
-      // 不是有效的 JSON，继续按 Markdown 处理
+      // JSON 解析失败，如果内容包含 blur 则返回空（避免泄露模糊内容）
+      if (content.includes('"blur"')) return ''
     }
   }
   
@@ -103,19 +104,27 @@ export function extractPlainText(content: string): string {
     .replace(/^\d+\.\s*/gm, '')
 }
 
-/** 从 JSON 字符串中提取所有 text 字段的值 */
+/** 从 JSON 字符串中提取所有 text 字段的值（排除 blur 样式的内容） */
 function extractTextFieldsFromJSON(content: string): string {
   const textMatches: string[] = []
   const regex = /"text"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g
   let match
   while ((match = regex.exec(content)) !== null) {
-    if (match[1]) {
-      try {
-        const decoded = JSON.parse(`"${match[1]}"`)
-        textMatches.push(decoded)
-      } catch {
-        textMatches.push(match[1])
-      }
+    if (!match[1]) continue
+    
+    // 检查当前 text 所在的对象是否带有 blur 样式
+    // 向前查找最近的 { 来获取对象上下文
+    const ctxStart = content.lastIndexOf('{', regex.lastIndex - match[0].length)
+    const ctx = ctxStart >= 0 ? content.slice(ctxStart, regex.lastIndex) : ''
+    // 如果上下文中包含 "blur": 样式（注意冒号），跳过这个文本
+    // blur 的值可能是 true 或 UUID 字符串
+    if (/"blur"\s*:/.test(ctx)) continue
+    
+    try {
+      const decoded = JSON.parse(`"${match[1]}"`)
+      textMatches.push(decoded)
+    } catch {
+      textMatches.push(match[1])
     }
   }
   return textMatches.join(' ')
@@ -131,7 +140,7 @@ function extractTextFromBlocks(blocks: any[]): string {
   return lines.join('\n')
 }
 
-/** 从单个 block 中提取文本 */
+/** 从单个 block 中提取文本（排除 blur 样式的内容） */
 function extractTextFromBlock(block: any): string {
   if (!block) return ''
   
@@ -140,9 +149,19 @@ function extractTextFromBlock(block: any): string {
     text = block.content
       .map((item: any) => {
         if (typeof item === 'string') return item
-        if (item.type === 'text') return item.text || ''
+        if (item.type === 'text') {
+          // 排除带有 blur 样式的文本
+          if (item.styles?.blur) return ''
+          return item.text || ''
+        }
         if (item.type === 'link') {
-          return item.content?.map((c: any) => c.text || '').join('') || ''
+          return item.content
+            ?.map((c: any) => {
+              // 排除带有 blur 样式的文本
+              if (c.styles?.blur) return ''
+              return c.text || ''
+            })
+            .join('') || ''
         }
         return ''
       })
