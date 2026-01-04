@@ -13,9 +13,14 @@ import * as converter from '../lib/blocknote/converter'
 
 vi.mock('@blocknote/core', () => ({
   BlockNoteSchema: { create: vi.fn(() => ({})) },
-  defaultBlockSpecs: {},
+  defaultBlockSpecs: { codeBlock: {} },
   defaultInlineContentSpecs: {},
   defaultStyleSpecs: {},
+  createCodeBlockSpec: vi.fn(() => ({})),
+}))
+
+vi.mock('@blocknote/code-block', () => ({
+  codeBlockOptions: {},
 }))
 
 vi.mock('@blocknote/core/extensions', () => ({
@@ -80,6 +85,7 @@ vi.mock('@blocknote/react', () => ({
   DragHandleMenu: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   useActiveStyles: vi.fn(() => ({})),
   createReactStyleSpec: vi.fn((config, impl) => ({ config, implementation: impl })),
+  createReactBlockSpec: vi.fn((config, impl) => ({ config, implementation: impl })),
   BlockNoteSchema: { create: vi.fn(() => ({})) },
   defaultBlockSpecs: {},
   defaultInlineContentSpecs: {},

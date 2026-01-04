@@ -22,7 +22,8 @@ import {
   DragHandleMenu,
   SideMenuProps,
 } from '@blocknote/react'
-import { BlockNoteSchema, defaultStyleSpecs, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core'
+import { BlockNoteSchema, defaultStyleSpecs, defaultBlockSpecs, defaultInlineContentSpecs, createCodeBlockSpec } from '@blocknote/core'
+import { codeBlockOptions } from '@blocknote/code-block'
 import { SideMenuExtension } from '@blocknote/core/extensions'
 import { 
   Text, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
@@ -121,11 +122,26 @@ const BlurStyleSpec = createReactStyleSpec(
   }
 )
 
+// 从默认块规范中排除代码块，使用带语法高亮的版本
+const { codeBlock: _defaultCodeBlock, ...restBlockSpecs } = defaultBlockSpecs
+
 /**
- * 自定义 schema，包含模糊样式
+ * 带语法高亮的代码块规范
+ * 使用 @blocknote/code-block 提供的预配置选项
+ */
+const customCodeBlock = createCodeBlockSpec({
+  ...codeBlockOptions,
+  defaultLanguage: 'javascript',
+})
+
+/**
+ * 自定义 schema，包含模糊样式和语法高亮代码块
  */
 const customSchema = BlockNoteSchema.create({
-  blockSpecs: defaultBlockSpecs,
+  blockSpecs: {
+    ...restBlockSpecs,
+    codeBlock: customCodeBlock,
+  },
   inlineContentSpecs: defaultInlineContentSpecs,
   styleSpecs: {
     ...defaultStyleSpecs,
@@ -407,7 +423,7 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
         return
       }
 
-      yjsBindingRef.current = new YjsBlockNoteBinding(yjsDoc, editor)
+      yjsBindingRef.current = new YjsBlockNoteBinding(yjsDoc, editor as any)
     }, [editor, yjsDoc])
 
     // Handle Y.Doc changes
@@ -439,14 +455,14 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
 
       const loadInitialContent = async () => {
         try {
-          const blocks = await markdownToBlocks(editor, initialContentRef.current)
+          const blocks = await markdownToBlocks(editor as any, initialContentRef.current)
           
           // If using Yjs, initialize the Y.Doc with blocks
           if (yjsDoc && yjsBindingRef.current) {
-            yjsBindingRef.current.initializeFromBlocks(blocks)
+            yjsBindingRef.current.initializeFromBlocks(blocks as any)
           } else {
             // Otherwise, use the standard BlockNote API
-            editor.replaceBlocks(editor.document, blocks)
+            editor.replaceBlocks(editor.document, blocks as any)
           }
           
           setConversionError(null)
@@ -465,7 +481,7 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
       // In Yjs mode, the Y.Doc update handler will be called separately
       // We still call onChange for backward compatibility with markdown-based workflows
       try { 
-        const markdown = blocksToMarkdown(editor.document)
+        const markdown = blocksToMarkdown(editor.document as any)
         onChangeRef.current(markdown)
       }
       catch (error) { 
@@ -500,10 +516,10 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
     const handleRetry = useCallback(() => { setConversionError(null); setRetryCount(c => c + 1) }, [])
 
     useImperativeHandle(ref, () => ({
-      getMarkdown: () => { if (!editor) return ''; try { return blocksToMarkdown(editor.document) } catch { return '' } },
-      clear: () => { if (!editor) return; try { editor.replaceBlocks(editor.document, []) } catch {} },
+      getMarkdown: () => { if (!editor) return ''; try { return blocksToMarkdown(editor.document as any) } catch { return '' } },
+      clear: () => { if (!editor) return; try { editor.replaceBlocks(editor.document as any, []) } catch {} },
       focus: () => { if (!editor) return; try { editor.focus() } catch {} },
-      getEditor: () => editor || null,
+      getEditor: () => (editor as any) || null,
       retry: handleRetry
     }), [editor, handleRetry])
 
