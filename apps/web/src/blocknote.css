@@ -65,12 +65,39 @@
 /* 移动端减少编辑器内边距 */
 @media (max-width: 900px) {
   .bn-editor {
-    padding-left: 0.5rem !important;
+    /* 给 Side Menu 留出空间 */
+    padding-left: 3rem !important;
     padding-right: 0.5rem !important;
   }
   
   .bn-block-outer {
     margin-left: 0 !important;
+  }
+}
+
+/* 小屏幕（手机）进一步优化 */
+@media (max-width: 480px) {
+  .bn-editor {
+    /* 给 Side Menu 留出最小空间 */
+    padding-left: 2.25rem !important;
+    padding-right: 0.25rem !important;
+  }
+  
+  /* 减小 Side Menu 按钮尺寸以节省空间 */
+  .bn-side-menu .bn-button {
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+  }
+  
+  .bn-side-menu .bn-button svg {
+    width: 12px !important;
+    height: 12px !important;
+  }
+  
+  .bn-side-menu {
+    gap: 2px !important;
   }
 }
 
