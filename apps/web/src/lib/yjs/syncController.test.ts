@@ -6,9 +6,10 @@ import { encodeYDoc, decodeYDoc } from './serializer'
 
 describe('SyncController', () => {
   let docManager: YjsDocManager
+  type SyncApi = ConstructorParameters<typeof SyncController>[1]
   let mockApi: {
-    getNote: ReturnType<typeof vi.fn>
-    putNote: ReturnType<typeof vi.fn>
+    getNote: ReturnType<typeof vi.fn<SyncApi['getNote']>>
+    putNote: ReturnType<typeof vi.fn<SyncApi['putNote']>>
   }
   let controller: SyncController
 

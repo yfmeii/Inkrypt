@@ -628,6 +628,8 @@
 .bn-editor .bn-block-content[data-content-type="bulletListItem"],
 .bn-editor .bn-block-content[data-content-type="numberedListItem"] {
   margin-block-end: 0.5em !important;
+  word-break: normal !important;
+  overflow-wrap: break-word !important;
 }
 
 /* 列表项标记 */

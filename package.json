@@ -7,7 +7,7 @@
     "dev:worker": "pnpm --filter @inkrypt/worker run dev",
     "build": "pnpm --filter @inkrypt/worker run build && pnpm --filter @inkrypt/web run build",
     "typecheck": "pnpm --filter @inkrypt/worker run typecheck && pnpm --filter @inkrypt/web run typecheck",
-    "test": "pnpm --filter @inkrypt/web run test"
+    "test": "pnpm --filter @inkrypt/worker run test && pnpm --filter @inkrypt/web run test"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

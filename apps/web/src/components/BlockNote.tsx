@@ -51,7 +51,70 @@ import '@blocknote/shadcn/style.css'
 import '../blocknote.css'
 import { markdownToBlocks, blocksToMarkdown } from '../lib/blocknote/converter'
 import { useInkryptStore } from '../state/store'
-import { YjsBlockNoteBinding } from '../lib/yjs/blockNoteBinding'
+import { BLOCKNOTE_YJS_INIT_ORIGIN, YjsBlockNoteBinding } from '../lib/yjs/blockNoteBinding'
+
+export type BlockNoteYjsChangeEvent = {
+  doc: Y.Doc
+  suppressDraftUpdate: boolean
+}
+
+function looksLikeOrderedListPaste(text: string): boolean {
+  return /(^|\n)\s*\d+[.)]\s+/.test(text)
+}
+
+function normalizeOrderedListNumbers(text: string): string {
+  const lines = text.split(/\r?\n/)
+  const counters = new Map<number, number>()
+
+  return lines
+    .map((line) => {
+      const match = line.match(/^(\s*)(\d+)([.)])(\s+.*)$/)
+      if (!match) return line
+
+      const indent = match[1]?.replace(/\t/g, '    ').length ?? 0
+      const marker = match[3] ?? '.'
+      const rest = match[4] ?? ''
+      const next = (counters.get(indent) ?? 0) + 1
+      counters.set(indent, next)
+
+      for (const key of Array.from(counters.keys())) {
+        if (key > indent) counters.delete(key)
+      }
+
+      return `${match[1] ?? ''}${next}${marker}${rest}`
+    })
+    .join('\n')
+}
+
+function getBlockTextLength(block: unknown): number {
+  if (!block || typeof block !== 'object') return 0
+  const record = block as {
+    content?: Array<{ text?: string } | string>
+    children?: unknown[]
+  }
+
+  const contentLength = Array.isArray(record.content)
+    ? record.content
+        .map((item) => {
+          if (typeof item === 'string') return item.length
+          if (item && typeof item === 'object' && 'text' in item && typeof item.text === 'string') return item.text.length
+          return 0
+        })
+        .reduce((sum, value) => sum + value, 0)
+    : 0
+
+  const childrenLength = Array.isArray(record.children)
+    ? record.children.map(getBlockTextLength).reduce((sum, value) => sum + value, 0)
+    : 0
+
+  return contentLength + childrenLength
+}
+
+function isEditorDocumentEmpty(document: unknown): boolean {
+  if (!Array.isArray(document)) return false
+  if (document.length === 0) return true
+  return document.every((block) => getBlockTextLength(block) === 0)
+}
 
 // ============================================
 // Blur Style - 模糊块功能
@@ -289,7 +352,7 @@ export interface BlockNoteComponentProps {
   onConversionError?: (error: Error, originalContent: string) => void
   // Yjs integration props
   yjsDoc?: Y.Doc
-  onYjsDocChange?: (doc: Y.Doc) => void
+  onYjsDocChange?: (event: BlockNoteYjsChangeEvent) => void
 }
 
 export interface BlockNoteComponentRef {
@@ -369,8 +432,10 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
     const onAddAttachmentRef = useRef(onAddAttachment)
     const onChangeRef = useRef(onChange)
     const initialContentRef = useRef(initialContent)
+    const rootRef = useRef<HTMLDivElement | null>(null)
     const [conversionError, setConversionError] = useState<{ error: Error; originalContent: string } | null>(null)
     const [retryCount, setRetryCount] = useState(0)
+    const suppressNextYjsDraftSyncRef = useRef(false)
 
     const dictionary = useMemo(() => ({ ...zh, placeholders: { ...zh.placeholders, default: placeholder, emptyDocument: placeholder } }), [placeholder])
 
@@ -405,7 +470,7 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
       uploadFile: createAttachmentUploader(onAddAttachmentRef),
       resolveFileUrl: async (url: string) => resolveAttachmentUrl(url, attachmentsRef.current),
       dictionary,
-      pasteHandler: ({ defaultPasteHandler }) => defaultPasteHandler({ prioritizeMarkdownOverHTML: false, plainTextAsMarkdown: true }),
+      pasteHandler: ({ defaultPasteHandler }) => defaultPasteHandler({ prioritizeMarkdownOverHTML: true, plainTextAsMarkdown: true }),
       // Yjs collaboration configuration
       collaboration: yjsDoc ? {
         fragment: yjsDoc.getXmlFragment('document-store'),
@@ -430,8 +495,10 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
     useEffect(() => {
       if (!yjsDoc || !onYjsDocChange) return
 
-      const updateHandler = () => {
-        onYjsDocChange(yjsDoc)
+      const updateHandler = (_update: Uint8Array, origin: unknown) => {
+        const suppressDraftUpdate = suppressNextYjsDraftSyncRef.current || origin === BLOCKNOTE_YJS_INIT_ORIGIN
+        suppressNextYjsDraftSyncRef.current = false
+        onYjsDocChange({ doc: yjsDoc, suppressDraftUpdate })
       }
 
       yjsDoc.on('update', updateHandler)
@@ -459,6 +526,7 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
           
           // If using Yjs, initialize the Y.Doc with blocks
           if (yjsDoc && yjsBindingRef.current) {
+            suppressNextYjsDraftSyncRef.current = true
             yjsBindingRef.current.initializeFromBlocks(blocks as any)
           } else {
             // Otherwise, use the standard BlockNote API
@@ -507,11 +575,30 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
     }, [onDropFiles])
 
     const handlePaste = useCallback((event: React.ClipboardEvent) => {
-      if (!onPasteFiles) return
       const hasText = event.clipboardData.types.includes('text/plain') || event.clipboardData.types.includes('text/html')
       const files = Array.from(event.clipboardData.items).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter((file): file is File => file !== null)
-      if (files.length > 0 && !hasText) { event.preventDefault(); onPasteFiles(files) }
-    }, [onPasteFiles])
+      if (files.length > 0 && !hasText) {
+        if (!onPasteFiles) return
+        event.preventDefault()
+        onPasteFiles(files)
+        return
+      }
+
+      if (!editor) return
+      const text = event.clipboardData.getData('text/plain')
+      if (!text || !looksLikeOrderedListPaste(text) || !isEditorDocumentEmpty(editor.document)) return
+
+      event.preventDefault()
+      void (async () => {
+        try {
+          const normalized = normalizeOrderedListNumbers(text)
+          const blocks = await markdownToBlocks(editor as any, normalized)
+          editor.replaceBlocks(editor.document, blocks as any)
+        } catch (error) {
+          console.error('Failed to normalize pasted ordered list:', error)
+        }
+      })()
+    }, [editor, onPasteFiles])
 
     const handleRetry = useCallback(() => { setConversionError(null); setRetryCount(c => c + 1) }, [])
 
@@ -538,9 +625,9 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
 
     if (!editor) return <div>Loading editor...</div>
     
-    return (
-      <div className="blocknote-wrapper" onDrop={handleDrop} onPaste={handlePaste}>
-        <BlockNoteView editor={editor} editable={!disabled} theme={isDark ? 'dark' : 'light'} data-theming-css-variables-demo shadCNComponents={shadcnComponents} formattingToolbar={false} sideMenu={false}>
+      return (
+        <div ref={rootRef} className="blocknote-wrapper" onDrop={handleDrop} onPaste={handlePaste}>
+          <BlockNoteView editor={editor} editable={!disabled} theme={isDark ? 'dark' : 'light'} data-theming-css-variables-demo shadCNComponents={shadcnComponents} formattingToolbar={false} sideMenu={false}>
           <SideMenuController sideMenu={(props) => <CustomSideMenu {...props} />} />
           <FormattingToolbarController formattingToolbar={() => (
             <FormattingToolbar>
