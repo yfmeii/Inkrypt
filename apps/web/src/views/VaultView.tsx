@@ -6,6 +6,7 @@ import { bytesToBase64, bytesToHex, encryptNotePayload, noteAad, type NotePayloa
 import { formatErrorZh } from '../lib/errors'
 import { useFocusTrap } from '../lib/focusTrap'
 import { useBodyScrollLock } from '../lib/scrollLock'
+import { estimateDataUrlBytes, fileToDataUrl } from '../lib/attachments'
 import {
   idbDeleteDraftNote,
   idbUpsertEncryptedNotes,
@@ -13,7 +14,9 @@ import {
 import { useInkryptStore, type DecryptedNote } from '../state/store'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { BlockNoteComponent, type BlockNoteComponentRef } from '../components/BlockNote'
+import { DrawingEditor } from '../components/DrawingEditor'
 import { AttachmentsPanel } from '../components/AttachmentsPanel'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Toast, ToastStack } from '../components/Toast'
 import { SettingsPanel } from '../components/SettingsPanel'
 import { SearchDialog } from '../components/SearchDialog'
@@ -21,7 +24,7 @@ import { useYjsSync } from '../hooks/useYjsSync'
 import { detectNoteFormat, migrateToYjs, type YjsNotePayload } from '../lib/yjs/migration'
 import type { NotePayloadWithYjs } from '../lib/yjs/syncController'
 import { encodeYDoc, mergeYDocs } from '../lib/yjs/serializer'
-import { useVaultAttachments } from './vault/attachments'
+import { countAttachmentRefs, useVaultAttachments } from './vault/attachments'
 import {
   type LocalDraftInfo,
   applySelectedBaselineState,
@@ -51,6 +54,17 @@ import {
 } from './vault/lifecycle'
 import { buildSyncButtonState, prepareSelectedSave, SYNC_BUSY_TEXT } from './vault/editor-state'
 import { buildSearchDialogResults, createSearchQueryState, SEARCH_PAGE_SIZE, useVaultSearchIndex, useVaultSearchResults } from './vault/search'
+import {
+  createDrawingId,
+  type DrawingInitialData,
+  getAttachmentNameFromUrl,
+  getDrawingAttachmentNames,
+  getDrawingIdFromAttachment,
+  MAX_DRAWING_PREVIEW_BYTES,
+  MAX_DRAWING_SCENE_BYTES,
+  parseDrawingSceneData,
+  sceneJsonToDataUrl,
+} from '../lib/drawing'
 import { SidebarInset, SidebarProvider } from '../components/ui/sidebar'
 import { Button } from '../components/ui/button'
 import { Plus, Search, Settings, RefreshCw, Lock, Edit3 } from 'lucide-react'
@@ -89,6 +103,13 @@ export function VaultView() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [confirmDeleteNote, setConfirmDeleteNote] = useState(false)
   const [confirmLock, setConfirmLock] = useState(false)
+  const [confirmDeleteDrawing, setConfirmDeleteDrawing] = useState<{ blockId: string; drawingId: string; title: string } | null>(null)
+  const [drawingEditorOpen, setDrawingEditorOpen] = useState(false)
+  const [drawingEditorSaving, setDrawingEditorSaving] = useState(false)
+  const [activeDrawingId, setActiveDrawingId] = useState<string | null>(null)
+  const [activeDrawingBlockId, setActiveDrawingBlockId] = useState<string | null>(null)
+  const [drawingTitle, setDrawingTitle] = useState('')
+  const [drawingInitialData, setDrawingInitialData] = useState<DrawingInitialData | null>(null)
   // Default true if not set
   const [showInfo, setShowInfo] = useState(() => !localStorage.getItem('inkrypt_hide_info'))
 
@@ -163,6 +184,7 @@ export function VaultView() {
 
   const blockNoteRef = useRef<BlockNoteComponentRef | null>(null)
   const yjsContentSyncTimerRef = useRef<number | null>(null)
+  const pendingDrawingInsertRef = useRef<((value: { drawingId: string; previewFilename: string; sceneFilename: string; title: string } | null) => void) | null>(null)
   const recoveryCodeModalRef = useRef<HTMLDivElement>(null)
   const helpModalRef = useRef<HTMLDivElement>(null)
 
@@ -369,6 +391,17 @@ export function VaultView() {
     cancelPendingLocalDraftSave()
     setLocalDraftSaving(false)
     resetAttachmentUi()
+    setDrawingEditorOpen(false)
+    setDrawingEditorSaving(false)
+    setConfirmDeleteDrawing(null)
+    setActiveDrawingId(null)
+    setActiveDrawingBlockId(null)
+    setDrawingTitle('')
+    setDrawingInitialData(null)
+    if (pendingDrawingInsertRef.current) {
+      pendingDrawingInsertRef.current(null)
+      pendingDrawingInsertRef.current = null
+    }
 
     if (!noteId) {
       resetSelectedDraftState(selectedDraftStateSetters)
@@ -697,11 +730,184 @@ export function VaultView() {
     }, 200)
   }
 
+  function syncDraftContentFromEditor(): void {
+    const markdown = blockNoteRef.current?.getMarkdown()
+    if (typeof markdown === 'string') {
+      draftContentRef.current = markdown
+      setDraftContent(markdown)
+    }
+  }
+
+  function openNewDrawing(drawingId?: string): string | null {
+    if (!selected || busy || attachmentsBusy || !selectedBaseline) return null
+    setError(null)
+    const nextId = drawingId ?? createDrawingId()
+    setActiveDrawingId(nextId)
+    setActiveDrawingBlockId(null)
+    setDrawingTitle('')
+    setDrawingInitialData(null)
+    setDrawingEditorOpen(true)
+    return nextId
+  }
+
+  async function openExistingDrawing(sceneAttachmentName: string, options?: { blockId?: string; title?: string }): Promise<void> {
+    const drawingId = getDrawingIdFromAttachment(sceneAttachmentName)
+    const sceneDataUrl = draftAttachments[sceneAttachmentName]
+    if (!drawingId || !sceneDataUrl) {
+      setError('未找到对应的绘图源文件')
+      return
+    }
+
+    try {
+      setError(null)
+      const sceneData = await parseDrawingSceneData(sceneDataUrl)
+      setActiveDrawingId(drawingId)
+      setActiveDrawingBlockId(options?.blockId ?? null)
+      setDrawingTitle(options?.title === '未命名绘图' ? '' : (options?.title ?? ''))
+      setDrawingInitialData(sceneData)
+      setDrawingEditorOpen(true)
+      setShowAttachments(false)
+    } catch (err) {
+      setError(formatErrorZh(err))
+    }
+  }
+
+  async function openExistingDrawingByUrl(sceneUrl: string, options?: { drawingId?: string; blockId?: string; title?: string }): Promise<void> {
+    const sceneAttachmentName = getAttachmentNameFromUrl(sceneUrl)
+    if (!sceneAttachmentName) {
+      setError('未找到对应的绘图源文件')
+      return
+    }
+
+    if (options?.drawingId && !draftAttachments[sceneAttachmentName]) {
+      const { scene } = getDrawingAttachmentNames(options.drawingId)
+      if (draftAttachments[scene]) {
+        await openExistingDrawing(scene, options)
+        return
+      }
+    }
+
+    await openExistingDrawing(sceneAttachmentName, options)
+  }
+
+  async function handleInsertDrawingFromSlashMenu(): Promise<{ drawingId: string; previewFilename: string; sceneFilename: string; title: string } | null> {
+    const drawingId = openNewDrawing()
+    if (!drawingId) return null
+    return await new Promise((resolve) => {
+      pendingDrawingInsertRef.current = resolve
+    })
+  }
+
+  async function handleSaveDrawing(payload: { drawingId: string; title: string; sceneJson: string; previewBlob: Blob }): Promise<void> {
+    const { drawingId, title, sceneJson, previewBlob } = payload
+    const sceneBytes = new TextEncoder().encode(sceneJson).length
+    if (sceneBytes > MAX_DRAWING_SCENE_BYTES) {
+      throw new Error('绘图源文件超过 3MB。Excalidraw 内嵌图片会显著增大体积，请压缩图片或减少嵌入图片后重试')
+    }
+
+    const previewDataUrl = await fileToDataUrl(previewBlob)
+    const previewBytes = estimateDataUrlBytes(previewDataUrl)
+    if ((previewBytes ?? Number.MAX_SAFE_INTEGER) > MAX_DRAWING_PREVIEW_BYTES) {
+      throw new Error('绘图预览图超过 1.5MB，请缩小画布或减少复杂内容后重试')
+    }
+
+    const { scene, preview } = getDrawingAttachmentNames(drawingId)
+    const sceneDataUrl = sceneJsonToDataUrl(sceneJson)
+
+    setDrawingEditorSaving(true)
+    setError(null)
+    try {
+      setDraftAttachments((prev) => ({
+        ...prev,
+        [scene]: sceneDataUrl,
+        [preview]: previewDataUrl,
+      }))
+
+      if (pendingDrawingInsertRef.current) {
+        const resolvePendingInsert = pendingDrawingInsertRef.current
+        pendingDrawingInsertRef.current = null
+        resolvePendingInsert({
+          drawingId,
+          previewFilename: preview,
+          sceneFilename: scene,
+          title,
+        })
+      } else {
+        const currentContent = blockNoteRef.current?.getMarkdown() ?? draftContentRef.current
+        if (countAttachmentRefs(currentContent, preview) === 0) {
+          blockNoteRef.current?.insertDrawingCard({
+            drawingId,
+            previewFilename: preview,
+            sceneFilename: scene,
+            title,
+          })
+          window.setTimeout(() => syncDraftContentFromEditor(), 0)
+        } else if (activeDrawingBlockId) {
+          const editor = blockNoteRef.current?.getEditor() as any
+          if (editor?.updateBlock) {
+            editor.updateBlock(activeDrawingBlockId, {
+              type: 'drawingCard',
+              props: {
+                title: title || '未命名绘图',
+              },
+            })
+            window.setTimeout(() => syncDraftContentFromEditor(), 0)
+          }
+        }
+      }
+
+      setDrawingEditorOpen(false)
+      setActiveDrawingBlockId(null)
+      setDrawingTitle('')
+      setDrawingInitialData(null)
+    } finally {
+      setDrawingEditorSaving(false)
+    }
+  }
+
+  function handleDownloadDrawingPreview(previewAttachmentUrl: string): void {
+    const attachmentName = getAttachmentNameFromUrl(previewAttachmentUrl)
+    if (!attachmentName) return
+    downloadAttachment(attachmentName)
+  }
+
+  function handleDeleteDrawing(blockId: string, drawingId: string): void {
+    const editor = blockNoteRef.current?.getEditor() as any
+    const { scene, preview } = getDrawingAttachmentNames(drawingId)
+
+    if (editor?.removeBlocks) {
+      editor.removeBlocks([blockId])
+    }
+
+    setDraftAttachments((prev) => {
+      const next = { ...prev }
+      delete next[scene]
+      delete next[preview]
+      return next
+    })
+
+    window.setTimeout(() => syncDraftContentFromEditor(), 0)
+  }
+
+  function handleRenameDrawing(blockId: string, title: string): void {
+    const editor = blockNoteRef.current?.getEditor() as any
+    if (!editor?.updateBlock) return
+    editor.updateBlock(blockId, {
+      type: 'drawingCard',
+      props: { title },
+    })
+    window.setTimeout(() => syncDraftContentFromEditor(), 0)
+  }
+
   useEffect(() => {
     return () => {
       if (yjsContentSyncTimerRef.current) {
         window.clearTimeout(yjsContentSyncTimerRef.current)
         yjsContentSyncTimerRef.current = null
+      }
+      if (pendingDrawingInsertRef.current) {
+        pendingDrawingInsertRef.current(null)
+        pendingDrawingInsertRef.current = null
       }
     }
   }, [])
@@ -977,6 +1183,7 @@ export function VaultView() {
                     void saveSelected()
                   }}
                   onDelete={() => setConfirmDeleteNote(true)}
+                  onOpenAttachments={() => setShowAttachments(true)}
                 />
 
                 {!selectedBaseline ? <div className="editorHint muted small">正在解密笔记…</div> : null}
@@ -1004,6 +1211,15 @@ export function VaultView() {
                     onPasteFiles={handleBlockNoteFiles}
                     yjsDoc={yjsSync.doc ?? undefined}
                     onYjsDocChange={handleYjsDocChange}
+                    onInsertDrawing={handleInsertDrawingFromSlashMenu}
+                    onEditDrawing={(blockId, drawingId, sceneUrl, title) => {
+                      void openExistingDrawingByUrl(sceneUrl, { blockId, drawingId, title })
+                    }}
+                    onDeleteDrawing={(blockId, drawingId, _sceneUrl, title) => {
+                      setConfirmDeleteDrawing({ blockId, drawingId, title })
+                    }}
+                    onDownloadDrawingPreview={handleDownloadDrawingPreview}
+                    onRenameDrawing={handleRenameDrawing}
                   />
                 </div>
 
@@ -1056,7 +1272,48 @@ export function VaultView() {
         onRemove={(name) => removeAttachment(name)}
         onDownload={(name) => downloadAttachment(name)}
         onCleanupUnused={(names) => setConfirmCleanupUnusedAttachments(names)}
+        onOpenDrawing={(name) => {
+          void openExistingDrawing(name)
+        }}
       />
+
+      <DrawingEditor
+        open={drawingEditorOpen}
+        drawingId={activeDrawingId}
+        title={drawingTitle}
+        initialData={drawingInitialData}
+        isSaving={drawingEditorSaving}
+        onOpenChange={(open) => {
+          setDrawingEditorOpen(open)
+          if (!open) {
+            if (pendingDrawingInsertRef.current) {
+              pendingDrawingInsertRef.current(null)
+              pendingDrawingInsertRef.current = null
+            }
+            setActiveDrawingBlockId(null)
+            setDrawingTitle('')
+            setDrawingInitialData(null)
+            setDrawingEditorSaving(false)
+          }
+        }}
+        onTitleChange={setDrawingTitle}
+        onSave={handleSaveDrawing}
+      />
+
+      {confirmDeleteDrawing ? (
+        <ConfirmDialog
+          title="删除绘图？"
+          message={`将删除绘图卡片「${confirmDeleteDrawing.title}」以及对应的源文件和 PNG 预览。此操作不可撤销。`}
+          confirmText="删除绘图"
+          confirmVariant="danger"
+          onCancel={() => setConfirmDeleteDrawing(null)}
+          onConfirm={() => {
+            const ctx = confirmDeleteDrawing
+            setConfirmDeleteDrawing(null)
+            handleDeleteDrawing(ctx.blockId, ctx.drawingId)
+          }}
+        />
+      ) : null}
 
       <SettingsPanel
         isOpen={showSettings}

@@ -1,4 +1,5 @@
 import type { MiddlewareHandler } from 'hono'
+import type { DurableObjectNamespace } from '../cloudflare'
 import type { AppEnv } from '../env'
 
 type Bucket = { resetAt: number; count: number }

@@ -1,5 +1,5 @@
 import type { AppEnv } from '../env'
-import { getCredentialForUser } from '../db'
+import { getCredentialForUser } from '../repositories/credentials'
 import { getVerifiedSessionFromCookie } from './sessionCookie'
 
 export type ActiveSession = {
@@ -37,4 +37,3 @@ export async function getActiveSessionFromCookie(
     },
   }
 }
-

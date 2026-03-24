@@ -260,6 +260,168 @@
   height: calc(var(--heti-line-height) * 1rem) !important;
 }
 
+.drawing-card {
+  width: min(100%, 640px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  text-align: left;
+  padding: 1rem;
+  margin: 0.35rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background: linear-gradient(180deg, color-mix(in oklch, var(--color-card), white 8%) 0%, var(--color-card) 100%);
+  box-shadow: 0 12px 28px rgb(15 23 42 / 0.08);
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.drawing-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 36px rgb(15 23 42 / 0.12);
+  border-color: color-mix(in oklch, var(--color-primary), var(--color-border) 45%);
+}
+
+.drawing-card:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--color-primary), white 15%);
+  outline-offset: 2px;
+}
+
+.drawing-card__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.drawing-card__menu-trigger {
+  width: 1.75rem;
+  height: 1.75rem;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  padding: 0;
+  color: var(--color-muted-foreground);
+}
+
+.drawing-card__preview-wrap {
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklch, var(--color-border), transparent 20%);
+  background:
+    radial-gradient(circle at top left, color-mix(in oklch, var(--color-primary), white 78%) 0%, transparent 32%),
+    linear-gradient(180deg, color-mix(in oklch, var(--color-muted), white 45%) 0%, var(--color-muted) 100%);
+}
+
+.drawing-card__preview {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  background: white;
+}
+
+.drawing-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.drawing-card__eyebrow {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+
+.drawing-card__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-foreground);
+}
+
+.drawing-card__title-row,
+.drawing-card__rename-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.drawing-card__title-button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: text;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.drawing-card__title-button:hover .drawing-card__title {
+  color: color-mix(in oklch, var(--color-foreground), var(--color-primary) 18%);
+}
+
+.ProseMirror-selectednode:has(.drawing-card) {
+  outline: none !important;
+}
+
+.ProseMirror-selectednode:has(.drawing-card) .drawing-card {
+  border-color: color-mix(in oklch, var(--color-primary), var(--color-border) 72%) !important;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-primary), transparent 78%), 0 12px 28px rgb(15 23 42 / 0.08) !important;
+}
+
+.ProseMirror-selectednode:has(.drawing-card)::selection,
+.ProseMirror-selectednode:has(.drawing-card) .drawing-card::selection,
+.ProseMirror-selectednode:has(.drawing-card) .drawing-card *::selection {
+  background: transparent;
+}
+
+.drawing-card__rename-row {
+  width: min(100%, 360px);
+}
+
+.drawing-card__rename-row .button[data-slot="button"] {
+  width: 1.4rem;
+  height: 1.4rem;
+  min-width: 1.4rem;
+  min-height: 1.4rem;
+  padding: 0;
+}
+
+.drawing-card__rename-confirm {
+  color: color-mix(in oklch, var(--color-primary), white 6%);
+}
+
+.drawing-card__rename-confirm:hover {
+  color: color-mix(in oklch, var(--color-primary), black 10%);
+  background: color-mix(in oklch, var(--color-primary), transparent 88%);
+}
+
+.drawing-card__rename-cancel {
+  color: var(--color-destructive);
+}
+
+.drawing-card__rename-cancel:hover {
+  color: color-mix(in oklch, var(--color-destructive), black 8%);
+  background: color-mix(in oklch, var(--color-destructive), transparent 90%);
+}
+
+@media (max-width: 640px) {
+  .drawing-card {
+    width: 100%;
+    padding: 0.875rem;
+    border-radius: 16px;
+  }
+
+  .drawing-card__meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 /* File block */
 .bn-side-menu[data-block-type="file"] {
   height: 38px !important;

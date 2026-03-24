@@ -1,9 +1,10 @@
 import type { ChangeEvent, DragEvent } from 'react'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { estimateDataUrlBytes, formatBytes, getDataUrlMime } from '../lib/attachments'
-import { useFocusTrap } from '../lib/focusTrap'
-import { useBodyScrollLock } from '../lib/scrollLock'
+import { isDrawingSceneAttachment } from '../lib/drawing'
+import { useOverlayPanel } from '../lib/useOverlayPanel'
+import { usePresenceMount } from '../lib/usePresenceMount'
 
 type AttachmentItem = {
   name: string
@@ -24,6 +25,7 @@ interface AttachmentsPanelProps {
   onRemove: (name: string) => void
   onDownload: (name: string) => void
   onCleanupUnused?: (names: string[]) => void
+  onOpenDrawing?: (name: string) => void
 }
 
 function isSafeInlineImageMime(mime: string | null): boolean {
@@ -43,8 +45,9 @@ export function AttachmentsPanel({
   onRemove,
   onDownload,
   onCleanupUnused,
+  onOpenDrawing,
 }: AttachmentsPanelProps) {
-  const [mounted, setMounted] = useState(isOpen)
+  const mounted = usePresenceMount(isOpen, { exitDelayMs: 260, respectReducedMotion: true })
   const [active, setActive] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const dragDepthRef = useRef(0)
@@ -57,26 +60,11 @@ export function AttachmentsPanel({
 
   useEffect(() => {
     if (isOpen) {
-      setMounted(true)
       const raf = requestAnimationFrame(() => setActive(true))
       return () => cancelAnimationFrame(raf)
     }
     setActive(false)
   }, [isOpen])
-
-  useEffect(() => {
-    if (!mounted || isOpen) return
-    if (!('matchMedia' in window)) return
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setMounted(false)
-    }
-  }, [isOpen, mounted])
-
-  useEffect(() => {
-    if (!mounted || isOpen) return
-    const t = window.setTimeout(() => setMounted(false), 260)
-    return () => window.clearTimeout(t)
-  }, [isOpen, mounted])
 
   const items = useMemo(() => {
     return Object.entries(attachments)
@@ -102,21 +90,23 @@ export function AttachmentsPanel({
   const [preview, setPreview] = useState<AttachmentItem | null>(null)
   useEffect(() => setPreview(null), [isOpen])
 
-  useFocusTrap(panelRef, Boolean(isOpen) && !preview)
-  useFocusTrap(previewModalRef, Boolean(preview))
-  useBodyScrollLock(mounted)
-
-  // Close on Escape key
-  useEffect(() => {
-    if (!isOpen) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      if (preview) setPreview(null)
-      else onClose()
+  const handleEscape = useCallback(() => {
+    if (preview) {
+      setPreview(null)
+      return
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose, preview])
+    onClose()
+  }, [onClose, preview])
+
+  useOverlayPanel(panelRef, {
+    focusActive: Boolean(isOpen) && !preview,
+    lockScroll: mounted,
+    onEscape: isOpen ? handleEscape : null,
+  })
+  useOverlayPanel(previewModalRef, {
+    focusActive: Boolean(preview),
+    lockScroll: false,
+  })
 
   function onInputChange(e: ChangeEvent<HTMLInputElement>) {
     if (isBusy) {
@@ -151,11 +141,6 @@ export function AttachmentsPanel({
         aria-labelledby={titleId}
         ref={panelRef}
         tabIndex={-1}
-        onTransitionEnd={(e) => {
-          if (e.target !== e.currentTarget) return
-          if (e.propertyName !== 'transform') return
-          if (!isOpen) setMounted(false)
-        }}
       >
         <div className="attachmentsHeader">
           <strong id={titleId}>附件</strong>
@@ -259,6 +244,11 @@ export function AttachmentsPanel({
                     <button className="btn" type="button" onClick={() => onDownload(it.name)} disabled={isBusy}>
                       下载
                     </button>
+                    {onOpenDrawing && isDrawingSceneAttachment(it.name) ? (
+                      <button className="btn" type="button" onClick={() => onOpenDrawing(it.name)} disabled={isBusy}>
+                        编辑绘图
+                      </button>
+                    ) : null}
                     <button className="btn danger" type="button" onClick={() => onRemove(it.name)} disabled={isBusy}>
                       移除
                     </button>

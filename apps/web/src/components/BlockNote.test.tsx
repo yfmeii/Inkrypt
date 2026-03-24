@@ -34,6 +34,8 @@ const mockEditor = {
   document: [],
   isEditable: true,
   tryParseMarkdownToBlocks: vi.fn(async () => []),
+  getTextCursorPosition: vi.fn(() => ({ block: null })),
+  insertBlocks: vi.fn(() => []),
   onChange: vi.fn(() => {
     return () => {}
   }),
@@ -105,9 +107,11 @@ vi.mock('@blocknote/react', () => ({
   SideMenu: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   AddBlockButton: () => null,
   DragHandleMenu: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  SuggestionMenuController: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  getDefaultReactSlashMenuItems: vi.fn(() => []),
   useActiveStyles: vi.fn(() => ({})),
   createReactStyleSpec: vi.fn((config, impl) => ({ config, implementation: impl })),
-  createReactBlockSpec: vi.fn((config, impl) => ({ config, implementation: impl })),
+  createReactBlockSpec: vi.fn((config, impl) => () => ({ config, implementation: impl })),
   BlockNoteSchema: { create: vi.fn(() => ({})) },
   defaultBlockSpecs: {},
   defaultInlineContentSpecs: {},

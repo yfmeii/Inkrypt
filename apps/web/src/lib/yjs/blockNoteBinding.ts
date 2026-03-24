@@ -2,6 +2,8 @@ import * as Y from 'yjs'
 import type { BlockNoteEditor, Block, PartialBlock } from '@blocknote/core'
 import { blocksToYXmlFragment, yXmlFragmentToBlocks } from '@blocknote/core/yjs'
 
+export const BLOCKNOTE_YJS_INIT_ORIGIN = 'blocknote:init'
+
 /**
  * BlockNote 与 Y.Doc 的绑定层
  * 使用 BlockNote 官方的 Yjs 工具函数
@@ -46,10 +48,10 @@ export class YjsBlockNoteBinding {
       while (this.fragment.length > 0) {
         this.fragment.delete(0, 1)
       }
-    })
-    
+    }, BLOCKNOTE_YJS_INIT_ORIGIN)
+
     // 应用临时文档的更新到目标文档
-    Y.applyUpdate(this.doc, update)
+    Y.applyUpdate(this.doc, update, BLOCKNOTE_YJS_INIT_ORIGIN)
   }
 
   /**

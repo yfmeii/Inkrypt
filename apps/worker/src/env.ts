@@ -1,3 +1,5 @@
+import type { D1Database, DurableObjectNamespace } from './cloudflare'
+
 export type Bindings = {
   DB: D1Database
   RATE_LIMITER: DurableObjectNamespace

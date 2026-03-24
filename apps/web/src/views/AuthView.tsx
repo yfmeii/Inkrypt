@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   ScanLineIcon,
@@ -9,22 +9,18 @@ import {
   ChevronDownIcon,
   InfoIcon,
 } from 'lucide-react'
-import { postJSON } from '../lib/api'
-import { type Bytes, base64UrlToBytes, bytesToBase64Url, randomBytes, unwrapMasterKey, wrapMasterKey } from '../lib/crypto'
-import { decryptMasterKeyFromTransfer, deriveSharedSecretBits, exportPublicKeyJwk, generateEphemeralEcdhKeyPair, generateSasEmoji } from '../lib/pairing'
-import { formatErrorZh } from '../lib/errors'
 import {
   PAIRING_SECRET_WORD_COUNT,
-  PAIRING_WORDLIST,
   extractPairingSecretFromText,
   normalizePairingSecret,
-  resolvePairingWord,
   splitPairingSecretWords,
 } from '../lib/pairingSecret'
-import { startAuthenticationWithPrf, startRegistrationWithPrf } from '../lib/webauthn'
 import { Toast, ToastStack } from '../components/Toast'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useInkryptStore } from '../state/store'
+import { PairingWordFields, type PairingWordFieldsHandle } from './auth/PairingWordFields'
+import { useAuthFlowController } from './auth/useAuthFlowController'
+import { useAuthPairing } from './auth/useAuthPairing'
 
 // shadcn UI components
 import { Button } from '@/components/ui/button'
@@ -40,24 +36,8 @@ import { Spinner } from '@/components/ui/spinner'
 
 type Mode = 'unlock' | 'setup' | 'pair'
 
-type HandshakeStatus = {
-  status: 'waiting_join' | 'waiting_confirm' | 'finished'
-  expiresAt: number
-  alicePublicKey: any
-  encryptedPayload: string | null
-  iv: string | null
-}
-
 const LS_CREDENTIAL_ID = 'inkrypt_credential_id'
 const LS_REMEMBER_UNLOCK = 'inkrypt_remember_unlock_pref'
-
-function normalizePairWordInput(input: string): string {
-  return input.trim().toLowerCase().replace(/[^a-z]/g, '')
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
-}
 
 export function AuthView() {
   const setSession = useInkryptStore((s) => s.setSession)
@@ -73,7 +53,6 @@ export function AuthView() {
   const [mode, setMode] = useState<Mode>('unlock')
   const [deviceName, setDeviceName] = useState('')
   const [pairWords, setPairWords] = useState<string[]>(() => Array.from({ length: PAIRING_SECRET_WORD_COUNT }, () => ''))
-  const [activePairWordIdx, setActivePairWordIdx] = useState<number | null>(null)
   const [rememberUnlock, setRememberUnlock] = useState(() => {
     try {
       const v = localStorage.getItem(LS_REMEMBER_UNLOCK)
@@ -84,22 +63,53 @@ export function AuthView() {
     }
   })
   const [confirmRememberUnlock, setConfirmRememberUnlock] = useState(false)
-
-  const [prepared, setPrepared] = useState<any | null>(null)
-  const [preparedPrfSalt, setPreparedPrfSalt] = useState<string | null>(null)
-
-  const [pairingSas, setPairingSas] = useState<string | null>(null)
-  const [pairingExpiresAt, setPairingExpiresAt] = useState<number | null>(null)
-  const [pairingMasterKey, setPairingMasterKey] = useState<Bytes | null>(null)
-  const pairingSecretRef = useRef<string | null>(null)
-  const pairingKeyPairRef = useRef<CryptoKeyPair | null>(null)
-  const pairingRunIdRef = useRef(0)
-  const pairWordRefs = useRef<Array<HTMLInputElement | null>>([])
-
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const pairWordFieldsRef = useRef<PairingWordFieldsHandle | null>(null)
   const [scanOpen, setScanOpen] = useState(false)
   const scanVideoRef = useRef<HTMLVideoElement | null>(null)
+
+  const {
+    authBusy,
+    authError,
+    prepared,
+    setAuthError,
+    clearAuthError,
+    resetAuthFlowState,
+    prepare,
+    finish,
+  } = useAuthFlowController({
+    mode,
+    deviceName,
+    rememberUnlock,
+    credentialStorageKey: LS_CREDENTIAL_ID,
+    onSessionReady: setSession,
+  })
+
+  const {
+    pairingBusy,
+    pairingError,
+    setPairingError,
+    pairingPrepared,
+    pairingSas,
+    pairingExpiresAt,
+    pairingMasterKey,
+    resetPairingState,
+    startPairing,
+    finishPairing,
+  } = useAuthPairing({
+    deviceName,
+    pairWords,
+    rememberUnlock,
+    credentialStorageKey: LS_CREDENTIAL_ID,
+    onSessionReady: setSession,
+  })
+
+  const busy = authBusy || pairingBusy
+  const error = authError ?? pairingError
+
+  function clearError() {
+    clearAuthError()
+    setPairingError(null)
+  }
 
   const title = useMemo(() => {
     switch (mode) {
@@ -121,51 +131,14 @@ export function AuthView() {
     }
   }, [pairWords])
 
-  const activePairWordPrefix = useMemo(() => {
-    if (mode !== 'pair') return ''
-    if (activePairWordIdx === null) return ''
-    return normalizePairWordInput(pairWords[activePairWordIdx] ?? '')
-  }, [activePairWordIdx, mode, pairWords])
-
-  const activePairWordSuggestions = useMemo(() => {
-    const prefix = activePairWordPrefix
-    if (mode !== 'pair') return []
-    if (activePairWordIdx === null) return []
-    if (prefix.length < 2) return []
-    if (!prefix) return []
-    if (resolvePairingWord(prefix) === prefix) return []
-
-    const out: string[] = []
-    for (const w of PAIRING_WORDLIST) {
-      if (w.startsWith(prefix)) out.push(w)
-      if (out.length >= 8) break
-    }
-    return out
-  }, [activePairWordIdx, activePairWordPrefix, mode])
-
   const canScanQr = useMemo(() => {
     if (typeof window === 'undefined') return false
     return Boolean(navigator.mediaDevices?.getUserMedia)
   }, [])
 
-  useEffect(() => {
-    return () => {
-      pairingRunIdRef.current += 1
-    }
-  }, [])
-
   function resetTransientState() {
-    setPrepared(null)
-    setPreparedPrfSalt(null)
-    setError(null)
-    setBusy(false)
-
-    setPairingSas(null)
-    setPairingExpiresAt(null)
-    setPairingMasterKey(null)
-    pairingSecretRef.current = null
-    pairingKeyPairRef.current = null
-    pairingRunIdRef.current += 1
+    resetAuthFlowState()
+    resetPairingState()
   }
 
   useEffect(() => {
@@ -186,14 +159,14 @@ export function AuthView() {
     setPairWords(splitPairingSecretWords(secret))
 
     requestAnimationFrame(() => {
-      pairWordRefs.current[0]?.focus()
+      pairWordFieldsRef.current?.focusWord(0)
     })
   }, [consumePairingPrefillSecret, pairingPrefillSecret])
 
   useEffect(() => {
     if (!scanOpen) return
     if (!canScanQr) {
-      setError('当前浏览器不支持扫码，请手动输入或粘贴配对口令。')
+      setAuthError('当前浏览器不支持扫码，请手动输入或粘贴配对口令。')
       setScanOpen(false)
       return
     }
@@ -204,7 +177,7 @@ export function AuthView() {
     void (async () => {
       const video = scanVideoRef.current
       if (!video) {
-        setError('扫码初始化失败，请重试或改为手动输入。')
+        setAuthError('扫码初始化失败，请重试或改为手动输入。')
         setScanOpen(false)
         return
       }
@@ -244,7 +217,7 @@ export function AuthView() {
         await s.start()
       } catch {
         if (!alive) return
-        setError('无法打开摄像头，请检查权限或改为手动输入。')
+        setAuthError('无法打开摄像头，请检查权限或改为手动输入。')
         setScanOpen(false)
       }
     })()
@@ -265,209 +238,6 @@ export function AuthView() {
     }
   }, [canScanQr, scanOpen])
 
-  async function prepare() {
-    setError(null)
-    setPrepared(null)
-    setPreparedPrfSalt(null)
-    setBusy(true)
-    try {
-      if (mode === 'setup') {
-        const resp = await postJSON<{ initialized: boolean; options?: any }>('/auth/register/start', {})
-        if (resp.initialized) {
-          setError('该保险库已创建；请直接在本设备"解锁"，或用"添加新设备"。')
-          return
-        }
-        setPrepared(resp.options)
-        return
-      }
-
-      if (mode === 'unlock') {
-        const preferredCredentialId = localStorage.getItem(LS_CREDENTIAL_ID) || undefined
-        const resp = await postJSON<{
-          options: any
-          prfSalt: string
-          credentialId: string
-          deviceName: string | null
-        }>('/auth/login/start', { credentialId: preferredCredentialId })
-
-        setPrepared(resp.options)
-        setPreparedPrfSalt(resp.prfSalt)
-        return
-      }
-    } catch (err) {
-      setError(formatErrorZh(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function finish() {
-    setError(null)
-    if (!prepared) {
-      setError('正在准备验证参数，请稍候…')
-      if (!busy) void prepare()
-      return
-    }
-
-    setBusy(true)
-    try {
-      if (mode === 'setup') {
-        const masterKey = randomBytes(32)
-        const prfSalt = randomBytes(32)
-
-        const { attestation, prfOutput } = await startRegistrationWithPrf(prepared, prfSalt)
-        const { wrappedKey, iv } = await wrapMasterKey(masterKey, prfOutput)
-
-        await postJSON('/auth/register/finish', {
-          attestation,
-          prfSalt: bytesToBase64Url(prfSalt),
-          wrappedKey,
-          iv,
-          deviceName: deviceName.trim() ? deviceName.trim() : undefined,
-        })
-
-        localStorage.setItem(LS_CREDENTIAL_ID, attestation.id)
-        setSession({ masterKey, credentialId: attestation.id, deviceName: deviceName.trim() || null, remember: rememberUnlock })
-        return
-      }
-
-      if (mode === 'unlock') {
-        if (!preparedPrfSalt) throw new Error('认证参数异常，请点击"重新准备"后再试')
-        const prfSaltBytes = base64UrlToBytes(preparedPrfSalt)
-
-        const { assertion, prfOutput } = await startAuthenticationWithPrf(prepared, prfSaltBytes)
-        const resp = await postJSON<{
-          wrappedKey: string
-          iv: string
-          credentialId: string
-          deviceName: string | null
-        }>('/auth/login/finish', { assertion })
-
-        const masterKey = await unwrapMasterKey(resp.wrappedKey, resp.iv, prfOutput)
-        setSession({
-          masterKey,
-          credentialId: resp.credentialId,
-          deviceName: resp.deviceName,
-          remember: rememberUnlock,
-        })
-        localStorage.setItem(LS_CREDENTIAL_ID, resp.credentialId)
-        return
-      }
-    } catch (err) {
-      setError(formatErrorZh(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function startPairing() {
-    setError(null)
-    setBusy(true)
-    setPrepared(null)
-    setPreparedPrfSalt(null)
-    setPairingSas(null)
-    setPairingExpiresAt(null)
-    setPairingMasterKey(null)
-    pairingKeyPairRef.current = null
-
-    const runId = ++pairingRunIdRef.current
-
-    try {
-      const secret = normalizePairingSecret(pairWords.join(' '))
-
-      const keyPair = await generateEphemeralEcdhKeyPair()
-      pairingKeyPairRef.current = keyPair
-      pairingSecretRef.current = secret
-      const publicKey = await exportPublicKeyJwk(keyPair.publicKey)
-
-      const joined = await postJSON<{ ok: true; expiresAt: number }>('/api/handshake/join', {
-        sessionSecret: secret,
-        publicKey,
-      })
-      setPairingExpiresAt(joined.expiresAt)
-
-      let sharedSecret: ArrayBuffer | null = null
-      while (runId === pairingRunIdRef.current) {
-        const status = await postJSON<HandshakeStatus>('/api/handshake/status/bob', {
-          sessionSecret: secret,
-        })
-        setPairingExpiresAt(status.expiresAt)
-
-        if (!sharedSecret && status.alicePublicKey && keyPair.privateKey) {
-          sharedSecret = await deriveSharedSecretBits(
-            keyPair.privateKey,
-            status.alicePublicKey as JsonWebKey,
-          )
-          setPairingSas(await generateSasEmoji(sharedSecret))
-        }
-
-        if (status.status === 'finished' && status.encryptedPayload && status.iv) {
-          if (!sharedSecret) {
-            sharedSecret = await deriveSharedSecretBits(
-              keyPair.privateKey,
-              status.alicePublicKey as JsonWebKey,
-            )
-            setPairingSas(await generateSasEmoji(sharedSecret))
-          }
-
-          const masterKey = await decryptMasterKeyFromTransfer(
-            sharedSecret,
-            status.encryptedPayload,
-            status.iv,
-          )
-          if (masterKey.byteLength !== 32) throw new Error('收到的主密钥长度异常')
-          setPairingMasterKey(masterKey)
-
-          const resp = await postJSON<{ options: any }>('/auth/device/add/start', { sessionSecret: secret })
-          setPrepared(resp.options)
-          break
-        }
-
-        await delay(1000)
-      }
-    } catch (err) {
-      setError(formatErrorZh(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function finishPairing() {
-    setError(null)
-    if (!prepared) {
-      setError('请先完成"连接旧设备"，并等待密钥传输完成。')
-      return
-    }
-    if (!pairingMasterKey) {
-      setError('尚未收到主密钥，请稍等或重新开始配对。')
-      return
-    }
-
-    setBusy(true)
-    try {
-      const secret = pairingSecretRef.current ?? normalizePairingSecret(pairWords.join(' '))
-      const prfSalt = randomBytes(32)
-      const { attestation, prfOutput } = await startRegistrationWithPrf(prepared, prfSalt)
-      const { wrappedKey, iv } = await wrapMasterKey(pairingMasterKey, prfOutput)
-
-      await postJSON('/auth/device/add', {
-        sessionSecret: secret,
-        attestation,
-        prfSalt: bytesToBase64Url(prfSalt),
-        wrappedKey,
-        iv,
-        deviceName: deviceName.trim() ? deviceName.trim() : undefined,
-      })
-
-      localStorage.setItem(LS_CREDENTIAL_ID, attestation.id)
-      setSession({ masterKey: pairingMasterKey, credentialId: attestation.id, deviceName: deviceName.trim() || null, remember: rememberUnlock })
-    } catch (err) {
-      setError(formatErrorZh(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
     <AuroraBackground>
       <motion.div
@@ -482,8 +252,8 @@ export function AuthView() {
         className="relative z-10 w-full max-w-lg px-4"
       >
         <ToastStack>
-          {busy && !error ? <Toast kind="loading" message={prepared ? '处理中…' : '正在准备验证…'} /> : null}
-          {error ? <Toast kind="error" message={error} onClose={() => setError(null)} /> : null}
+          {busy && !error ? <Toast kind="loading" message={prepared || pairingPrepared ? '处理中…' : '正在准备验证…'} /> : null}
+          {error ? <Toast kind="error" message={error} onClose={clearError} /> : null}
         </ToastStack>
 
         {/* Header */}
@@ -644,110 +414,7 @@ export function AuthView() {
                 {/* Pair words grid */}
                 <div className="space-y-2">
                   <Label>配对口令（{PAIRING_SECRET_WORD_COUNT} 个英文单词，约 5 分钟内有效）</Label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {pairWords.map((word, idx) => {
-                      const resolved = resolvePairingWord(word)
-                      const cleaned = normalizePairWordInput(word)
-                      const invalid = Boolean(cleaned) && cleaned.length >= 4 && !resolved
-                      return (
-                        <Input
-                          key={idx}
-                          ref={(el) => {
-                            pairWordRefs.current[idx] = el
-                          }}
-                          className={cn(invalid && 'border-destructive ring-destructive/20')}
-                          value={word}
-                          onChange={(e) => {
-                            const nextWord = normalizePairWordInput(e.target.value)
-                            setPairWords((prev) => {
-                              const next = [...prev]
-                              next[idx] = nextWord
-                              return next
-                            })
-                          }}
-                          onFocus={() => setActivePairWordIdx(idx)}
-                          onBlur={() => {
-                            if (!resolved || resolved === word) return
-                            setPairWords((prev) => {
-                              const next = [...prev]
-                              next[idx] = resolved
-                              return next
-                            })
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === ' ' || e.key === 'Enter') {
-                              e.preventDefault()
-                              pairWordRefs.current[Math.min(idx + 1, PAIRING_SECRET_WORD_COUNT - 1)]?.focus()
-                              return
-                            }
-                            if (e.key === 'Backspace' && !word && idx > 0) {
-                              pairWordRefs.current[idx - 1]?.focus()
-                            }
-                          }}
-                          onPaste={(e) => {
-                            const text = e.clipboardData.getData('text')
-                            if (!text) return
-
-                            const extracted = extractPairingSecretFromText(text)
-                            if (extracted) {
-                              e.preventDefault()
-                              setPairWords(splitPairingSecretWords(extracted))
-                              requestAnimationFrame(() => {
-                                pairWordRefs.current[Math.min(PAIRING_SECRET_WORD_COUNT - 1, idx + 1)]?.focus()
-                              })
-                              return
-                            }
-
-                            const words = splitPairingSecretWords(text)
-                            if (words.length <= 1) return
-                            e.preventDefault()
-                            setPairWords((prev) => {
-                              const next = [...prev]
-                              for (let i = 0; i < words.length && idx + i < PAIRING_SECRET_WORD_COUNT; i++) {
-                                next[idx + i] = words[i]
-                              }
-                              return next
-                            })
-                          }}
-                          inputMode="text"
-                          autoComplete="off"
-                          autoCapitalize="none"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          placeholder={`单词 ${idx + 1}`}
-                        />
-                      )
-                    })}
-                  </div>
-
-                  {/* Suggestions */}
-                  {activePairWordSuggestions.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {activePairWordSuggestions.map((w) => (
-                        <Button
-                          key={w}
-                          variant="outline"
-                          size="sm"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onPointerDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            const idx = activePairWordIdx
-                            if (idx === null) return
-                            setPairWords((prev) => {
-                              const next = [...prev]
-                              next[idx] = w
-                              return next
-                            })
-                            requestAnimationFrame(() => {
-                              pairWordRefs.current[Math.min(idx + 1, PAIRING_SECRET_WORD_COUNT - 1)]?.focus()
-                            })
-                          }}
-                        >
-                          {w}
-                        </Button>
-                      ))}
-                    </div>
-                  )}
+                  <PairingWordFields ref={pairWordFieldsRef} pairWords={pairWords} onPairWordsChange={setPairWords} />
 
                   <p className="text-xs text-muted-foreground">
                     支持粘贴整段口令；也支持输入每个单词前 4 个字母。
@@ -803,7 +470,7 @@ export function AuthView() {
                   <Button variant="outline" onClick={startPairing} disabled={busy || !pairingTicketValid} className="rounded-full">
                     1. 连接旧设备
                   </Button>
-                  <Button onClick={finishPairing} disabled={busy || !prepared || !pairingMasterKey} className="flex-1 rounded-full shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all active:scale-95">
+                  <Button onClick={finishPairing} disabled={busy || !pairingPrepared || !pairingMasterKey} className="flex-1 rounded-full shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all active:scale-95">
                     {busy && <Spinner className="mr-1" />}
                     2. 创建 Passkey 并完成
                   </Button>
@@ -820,38 +487,7 @@ export function AuthView() {
         </div>
       </motion.div>
 
-      {/* QR Scanner Modal */}
-      <AnimatePresence>
-        {scanOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 12 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.98, y: 12 }}
-              transition={{ type: 'spring', stiffness: 260, damping: 22 }}
-              className="w-full max-w-md"
-            >
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle>扫码输入配对口令</CardTitle>
-                  <Button variant="outline" size="sm" onClick={() => setScanOpen(false)} className="rounded-full">
-                    关闭
-                  </Button>
-                </CardHeader>
-                <CardContent>
-                  <video ref={scanVideoRef} className="w-full max-h-[60vh] rounded-lg bg-black" muted playsInline />
-                  <p className="text-xs text-muted-foreground mt-2">请将二维码对准相机。</p>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <QrScannerModal open={scanOpen} videoRef={scanVideoRef} onClose={() => setScanOpen(false)} />
 
       {/* Confirm remember unlock dialog */}
       {confirmRememberUnlock && (
@@ -915,6 +551,50 @@ function RememberUnlockSection({
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+function QrScannerModal({
+  open,
+  videoRef,
+  onClose,
+}: {
+  open: boolean
+  videoRef: Ref<HTMLVideoElement>
+  onClose: () => void
+}) {
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.98, y: 12 }}
+            transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+            className="w-full max-w-md"
+          >
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>扫码输入配对口令</CardTitle>
+                <Button variant="outline" size="sm" onClick={onClose} className="rounded-full">
+                  关闭
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <video ref={videoRef} className="w-full max-h-[60vh] rounded-lg bg-black" muted playsInline />
+                <p className="mt-2 text-xs text-muted-foreground">请将二维码对准相机。</p>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 

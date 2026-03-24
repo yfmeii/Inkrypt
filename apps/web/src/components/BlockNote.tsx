@@ -3,7 +3,7 @@
  */
 
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle, useMemo, useState } from 'react'
-import { useCreateBlockNote, useBlockNoteEditor, useComponentsContext, useDictionary, useExtension, useExtensionState, createReactStyleSpec, useActiveStyles } from '@blocknote/react'
+import { useCreateBlockNote, useBlockNoteEditor, useComponentsContext, useDictionary, useExtension, useExtensionState, createReactStyleSpec, useActiveStyles, createReactBlockSpec, SuggestionMenuController, getDefaultReactSlashMenuItems } from '@blocknote/react'
 import { BlockNoteView, ShadCNDefaultComponents } from '@blocknote/shadcn'
 import type { ShadCNComponents } from '@blocknote/shadcn'
 import {
@@ -28,6 +28,7 @@ import { SideMenuExtension } from '@blocknote/core/extensions'
 import { 
   Text, Heading1, Heading2, Heading3, Heading4, Heading5, Heading6,
   List, ListOrdered, CheckSquare, Code, Image, Video, FileAudio, File, Table, Quote, Trash2, EyeOff,
+  PenSquare,
 } from 'lucide-react'
 import { zh } from '@blocknote/core/locales'
 import type { BlockNoteEditor } from '@blocknote/core'
@@ -52,6 +53,8 @@ import '../blocknote.css'
 import { markdownToBlocks, blocksToMarkdown } from '../lib/blocknote/converter'
 import { useInkryptStore } from '../state/store'
 import { BLOCKNOTE_YJS_INIT_ORIGIN, YjsBlockNoteBinding } from '../lib/yjs/blockNoteBinding'
+import { DrawingCard } from './blocknote/DrawingCard'
+import { toDrawingPreviewUrl, toDrawingSceneUrl } from '../lib/drawing'
 
 export type BlockNoteYjsChangeEvent = {
   doc: Y.Doc
@@ -185,6 +188,63 @@ const BlurStyleSpec = createReactStyleSpec(
   }
 )
 
+const drawingCardBlock = createReactBlockSpec(
+  {
+    type: 'drawingCard',
+    propSchema: {
+      drawingId: { default: '' },
+      previewUrl: { default: '' },
+      sceneUrl: { default: '' },
+      title: { default: '' },
+    },
+    content: 'none',
+  },
+  {
+    render: ({ block, editor }) => {
+      const onEditDrawing = (editor as any).__inkryptOpenDrawing as ((blockId: string, drawingId: string, sceneUrl: string, title: string) => void) | undefined
+      const onDeleteDrawing = (editor as any).__inkryptDeleteDrawing as ((blockId: string, drawingId: string, sceneUrl: string, title: string) => void) | undefined
+      const onDownloadDrawingPreview = (editor as any).__inkryptDownloadDrawingPreview as ((previewAttachmentUrl: string) => void) | undefined
+      const onRenameDrawing = (editor as any).__inkryptRenameDrawing as ((blockId: string, title: string) => void) | undefined
+      const resolveAttachment = (editor as any).__inkryptResolveAttachment as ((url: string) => string) | undefined
+      return (
+        <DrawingCard
+          blockId={block.id}
+          drawingId={block.props.drawingId}
+          previewUrl={resolveAttachment ? resolveAttachment(block.props.previewUrl) : block.props.previewUrl}
+          previewAttachmentUrl={block.props.previewUrl}
+          sceneUrl={block.props.sceneUrl}
+          title={block.props.title}
+          onEdit={onEditDrawing}
+          onDownload={onDownloadDrawingPreview}
+          onDelete={onDeleteDrawing}
+          onRename={onRenameDrawing}
+        />
+      )
+    },
+    toExternalHTML: ({ block, editor }) => {
+      const onEditDrawing = (editor as any).__inkryptOpenDrawing as ((blockId: string, drawingId: string, sceneUrl: string, title: string) => void) | undefined
+      const onDeleteDrawing = (editor as any).__inkryptDeleteDrawing as ((blockId: string, drawingId: string, sceneUrl: string, title: string) => void) | undefined
+      const onDownloadDrawingPreview = (editor as any).__inkryptDownloadDrawingPreview as ((previewAttachmentUrl: string) => void) | undefined
+      const onRenameDrawing = (editor as any).__inkryptRenameDrawing as ((blockId: string, title: string) => void) | undefined
+      const resolveAttachment = (editor as any).__inkryptResolveAttachment as ((url: string) => string) | undefined
+      return (
+        <DrawingCard
+          blockId={block.id}
+          drawingId={block.props.drawingId}
+          previewUrl={resolveAttachment ? resolveAttachment(block.props.previewUrl) : block.props.previewUrl}
+          previewAttachmentUrl={block.props.previewUrl}
+          sceneUrl={block.props.sceneUrl}
+          title={block.props.title}
+          onEdit={onEditDrawing}
+          onDownload={onDownloadDrawingPreview}
+          onDelete={onDeleteDrawing}
+          onRename={onRenameDrawing}
+        />
+      )
+    },
+  }
+)
+
 // 从默认块规范中排除代码块，使用带语法高亮的版本
 const { codeBlock: _defaultCodeBlock, ...restBlockSpecs } = defaultBlockSpecs
 
@@ -204,6 +264,7 @@ const customSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...restBlockSpecs,
     codeBlock: customCodeBlock,
+    drawingCard: drawingCardBlock(),
   },
   inlineContentSpecs: defaultInlineContentSpecs,
   styleSpecs: {
@@ -353,6 +414,11 @@ export interface BlockNoteComponentProps {
   // Yjs integration props
   yjsDoc?: Y.Doc
   onYjsDocChange?: (event: BlockNoteYjsChangeEvent) => void
+  onInsertDrawing?: () => Promise<{ drawingId: string; previewFilename: string; sceneFilename: string; title: string } | null>
+  onEditDrawing?: (blockId: string, drawingId: string, sceneUrl: string, title: string) => void
+  onDeleteDrawing?: (blockId: string, drawingId: string, sceneUrl: string, title: string) => void
+  onDownloadDrawingPreview?: (previewAttachmentUrl: string) => void
+  onRenameDrawing?: (blockId: string, title: string) => void
 }
 
 export interface BlockNoteComponentRef {
@@ -361,6 +427,42 @@ export interface BlockNoteComponentRef {
   focus: () => void
   getEditor: () => BlockNoteEditor | null
   retry: () => void
+  insertDrawingCard: (payload: { drawingId: string; previewFilename: string; sceneFilename: string; title?: string }) => void
+}
+
+function createDrawingCardBlock(payload: { drawingId: string; previewFilename: string; sceneFilename: string; title?: string }) {
+  return {
+    type: 'drawingCard',
+    props: {
+      drawingId: payload.drawingId,
+      previewUrl: toDrawingPreviewUrl(payload.previewFilename),
+      sceneUrl: toDrawingSceneUrl(payload.sceneFilename),
+      title: payload.title ?? '未命名绘图',
+    },
+  }
+}
+
+function createDrawingSlashItem(editor: BlockNoteEditor | null, onInsertDrawing?: () => Promise<{ drawingId: string; previewFilename: string; sceneFilename: string; title: string } | null>) {
+  if (!editor || !onInsertDrawing) return null
+  return {
+    title: '绘图卡片',
+    subtext: '插入可点击编辑的 Excalidraw 绘图卡片',
+    aliases: ['drawing', 'draw', 'excalidraw', '画图', '绘图'],
+    group: 'Media',
+    icon: <PenSquare size={18} />,
+    onItemClick: async () => {
+      const result = await onInsertDrawing()
+      if (!result) return
+      const cursor = editor.getTextCursorPosition?.()
+      const anchor = cursor?.block ?? editor.document?.[editor.document.length - 1]
+      const block = createDrawingCardBlock(result)
+      if (anchor && typeof editor.insertBlocks === 'function') {
+        editor.insertBlocks([block as any], anchor, 'after')
+      } else if (typeof editor.replaceBlocks === 'function') {
+        editor.replaceBlocks(editor.document ?? [], [block as any])
+      }
+    },
+  }
 }
 
 function resolveAttachmentUrl(url: string, attachments: Record<string, string>): string {
@@ -397,7 +499,7 @@ function createAttachmentUploader(
 
 export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteComponentProps>(
   function BlockNoteComponent(props, ref) {
-    const { initialContent, attachments, onChange, disabled = false, placeholder = '请输入内容...', onAddAttachment, onDropFiles, onPasteFiles, onConversionError, yjsDoc, onYjsDocChange } = props
+    const { initialContent, attachments, onChange, disabled = false, placeholder = '请输入内容...', onAddAttachment, onDropFiles, onPasteFiles, onConversionError, yjsDoc, onYjsDocChange, onInsertDrawing, onEditDrawing, onDeleteDrawing, onDownloadDrawingPreview, onRenameDrawing } = props
     const mode = useInkryptStore((state) => state.mode)
     
     const [isDark, setIsDark] = useState(() => {
@@ -480,6 +582,31 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
         }
       } : undefined
     })
+
+    ;(editor as any).__inkryptOpenDrawing = onEditDrawing
+    ;(editor as any).__inkryptDeleteDrawing = onDeleteDrawing
+    ;(editor as any).__inkryptDownloadDrawingPreview = onDownloadDrawingPreview
+    ;(editor as any).__inkryptRenameDrawing = onRenameDrawing
+    ;(editor as any).__inkryptResolveAttachment = (url: string) => resolveAttachmentUrl(url, attachmentsRef.current)
+
+    const insertDrawingCard = useCallback((payload: { drawingId: string; previewFilename: string; sceneFilename: string; title?: string }) => {
+      if (!editor) return
+      const cursor = editor.getTextCursorPosition?.()
+      const anchor = cursor?.block ?? editor.document?.[editor.document.length - 1]
+      const block = createDrawingCardBlock(payload)
+      if (anchor && typeof editor.insertBlocks === 'function') {
+        editor.insertBlocks([block as any], anchor, 'after')
+      } else if (typeof editor.replaceBlocks === 'function') {
+        editor.replaceBlocks(editor.document ?? [], [block as any])
+      }
+    }, [editor])
+
+    const slashItems = useMemo(() => {
+      if (!editor) return []
+      const defaults = getDefaultReactSlashMenuItems(editor as any)
+      const drawingItem = createDrawingSlashItem(editor as any, onInsertDrawing)
+      return drawingItem ? [drawingItem, ...defaults] : defaults
+    }, [editor, onInsertDrawing])
 
     // Initialize Yjs binding when editor and yjsDoc are available
     useEffect(() => {
@@ -607,8 +734,9 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
       clear: () => { if (!editor) return; try { editor.replaceBlocks(editor.document as any, []) } catch {} },
       focus: () => { if (!editor) return; try { editor.focus() } catch {} },
       getEditor: () => (editor as any) || null,
-      retry: handleRetry
-    }), [editor, handleRetry])
+      retry: handleRetry,
+      insertDrawingCard,
+    }), [editor, handleRetry, insertDrawingCard])
 
     if (conversionError) {
       return (
@@ -628,6 +756,14 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
       return (
         <div ref={rootRef} className="blocknote-wrapper" onDrop={handleDrop} onPaste={handlePaste}>
           <BlockNoteView editor={editor} editable={!disabled} theme={isDark ? 'dark' : 'light'} data-theming-css-variables-demo shadCNComponents={shadcnComponents} formattingToolbar={false} sideMenu={false}>
+          <SuggestionMenuController triggerCharacter="/" getItems={async (query) => {
+            const normalized = query.trim().toLowerCase()
+            return slashItems.filter((item) => {
+              if (!normalized) return true
+              const haystack = [item.title, item.subtext, ...(item.aliases ?? [])].filter(Boolean).join(' ').toLowerCase()
+              return haystack.includes(normalized)
+            })
+          }} />
           <SideMenuController sideMenu={(props) => <CustomSideMenu {...props} />} />
           <FormattingToolbarController formattingToolbar={() => (
             <FormattingToolbar>
