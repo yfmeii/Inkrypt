@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as Y from 'yjs'
-import { YjsDocManager } from '../lib/yjs/docManager'
-import { SyncController, type SyncResult, type SyncStatus, type NotePayloadWithYjs } from '../lib/yjs/syncController'
-import { LocalPersistence } from '../lib/yjs/localPersistence'
-import { encodeYDoc } from '../lib/yjs/serializer'
+import {
+  YjsDocManager,
+  SyncController,
+  LocalPersistence,
+  encodeYDoc,
+} from '../lib/yjs'
+import type { SyncResult, SyncStatus, NotePayloadWithYjs } from '../lib/yjs'
 
 export interface UseYjsSyncOptions {
   noteId: string
@@ -44,6 +47,9 @@ export function useYjsSync(options: UseYjsSyncOptions): UseYjsSyncReturn {
   const [lastSyncStatus, setLastSyncStatus] = useState<SyncStatus>({ type: 'idle' })
   const [isSyncing, setIsSyncing] = useState(false)
 
+  // 用于追踪同步中状态，避免 SyncController 的 success 在本地持久化完成前流入 UI
+  const syncInProgressRef = useRef(false)
+
   // 初始化管理器
   useEffect(() => {
     if (!docManagerRef.current) {
@@ -56,7 +62,13 @@ export function useYjsSync(options: UseYjsSyncOptions): UseYjsSyncReturn {
       syncControllerRef.current = new SyncController(docManagerRef.current, api)
       
       // 订阅同步状态变化
+      // 注意：当 syncInProgressRef.current 为 true 时，不直接传递 'success' 状态
+      // 因为此时本地快照尚未持久化，需要在 sync() 中手动处理最终状态
       syncControllerRef.current.onStatus((status) => {
+        if (syncInProgressRef.current && status.type === 'success') {
+          // 不在此时设置 success 状态，等待 sync() 中本地持久化完成后再设置
+          return
+        }
         setLastSyncStatus(status)
         setIsSyncing(status.type === 'syncing')
       })
@@ -150,23 +162,47 @@ export function useYjsSync(options: UseYjsSyncOptions): UseYjsSyncReturn {
       return { success: false, mergedRemote: false, error: 'SyncController not initialized' }
     }
 
+    syncInProgressRef.current = true
+
     try {
       const result = await syncController.sync(noteId)
-      
+
       if (result.success) {
-        // 同步成功，保存到本地
-        await saveToLocal()
-        onSyncComplete?.(result.mergedRemote)
+        try {
+          const docManager = docManagerRef.current
+          const localPersistence = localPersistenceRef.current
+          const currentDoc = docManager?.getDoc()
+          if (currentDoc && localPersistence) {
+            const { encodeYDoc: encode } = await import('../lib/yjs')
+            const snapshot = encode(currentDoc)
+            await localPersistence.saveSnapshot(noteId, snapshot)
+          }
+          setLastSyncStatus({ type: 'success', mergedRemote: result.mergedRemote })
+          setIsSyncing(false)
+          onSyncComplete?.(result.mergedRemote)
+        } catch (localError) {
+          const message = localError instanceof Error ? localError.message : '本地快照保存失败'
+          console.error('Failed to persist local Yjs snapshot after sync:', localError)
+          setLastSyncStatus({ type: 'error', message: `本地快照保存失败: ${message}`, canRetry: true })
+          setIsSyncing(false)
+          onSyncError?.(message)
+          // NOTE: intentionally return result (success=true) here so VaultView.saveSelected()
+          // proceeds with its downstream encrypted-note IDB write even when local Yjs snapshot fails.
+        }
       } else {
+        setIsSyncing(false)
         onSyncError?.(result.error ?? '同步失败')
       }
       return result
     } catch (error) {
       const message = error instanceof Error ? error.message : '同步失败'
+      setIsSyncing(false)
       onSyncError?.(message)
       return { success: false, mergedRemote: false, error: message }
+    } finally {
+      syncInProgressRef.current = false
     }
-  }, [noteId, saveToLocal, onSyncComplete, onSyncError])
+  }, [noteId, onSyncComplete, onSyncError])
 
   // 自动保存到本地（当文档变化时）
   useEffect(() => {
@@ -178,6 +214,39 @@ export function useYjsSync(options: UseYjsSyncOptions): UseYjsSyncReturn {
 
     return () => clearTimeout(timer)
   }, [doc, dirty, saveToLocal])
+
+  // 最佳实践：页面隐藏或卸载时刷新本地快照（不阻塞，静默失败）
+  useEffect(() => {
+    const flushLocalSnapshot = () => {
+      const docManager = docManagerRef.current
+      const localPersistence = localPersistenceRef.current
+      const currentDoc = docManager?.getDoc()
+      if (!currentDoc || !localPersistence || !noteId) return
+
+      const snapshot = encodeYDoc(currentDoc)
+      localPersistence.saveSnapshot(noteId, snapshot).catch(() => {
+        // 静默失败，不阻塞页面卸载
+      })
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushLocalSnapshot()
+      }
+    }
+
+    const handlePageHide = () => {
+      flushLocalSnapshot()
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('pagehide', handlePageHide)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('pagehide', handlePageHide)
+    }
+  }, [noteId])
 
   return {
     doc,
