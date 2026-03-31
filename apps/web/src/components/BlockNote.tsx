@@ -52,7 +52,7 @@ import '@blocknote/shadcn/style.css'
 import '../blocknote.css'
 import { markdownToBlocks, blocksToMarkdown } from '../lib/blocknote/converter'
 import { useInkryptStore } from '../state/store'
-import { BLOCKNOTE_YJS_INIT_ORIGIN, YjsBlockNoteBinding } from '../lib/yjs/blockNoteBinding'
+import { BLOCKNOTE_YJS_INIT_ORIGIN, YjsBlockNoteBinding } from '../lib/yjs'
 import { DrawingCard } from './blocknote/DrawingCard'
 import { toDrawingPreviewUrl, toDrawingSceneUrl } from '../lib/drawing'
 

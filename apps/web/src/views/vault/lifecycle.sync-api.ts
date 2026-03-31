@@ -1,7 +1,7 @@
 import type { MutableRefObject } from 'react'
 import { ApiError, getJSON, postJSON } from '../../lib/api'
 import { decryptNotePayload, encryptNotePayload, noteAad, type Bytes, type NotePayload } from '../../lib/crypto'
-import type { NotePayloadWithYjs } from '../../lib/yjs/syncController'
+import type { NotePayloadWithYjs } from '../../lib/yjs'
 import type { DecryptedNote } from '../../state/store'
 import { NotesGetResponse, NotesPostResponse, type SyncSavedRecord } from './lifecycle.shared'
 

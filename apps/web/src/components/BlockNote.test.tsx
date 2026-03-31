@@ -10,7 +10,7 @@ import fc from 'fast-check'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { BlockNoteComponent } from './BlockNote'
 import * as converter from '../lib/blocknote/converter'
-import { BLOCKNOTE_YJS_INIT_ORIGIN } from '../lib/yjs/blockNoteBinding'
+import { BLOCKNOTE_YJS_INIT_ORIGIN } from '../lib/yjs'
 
 const yjsListeners = new Map<string, Set<(...args: any[]) => void>>()
 const mockYjsDoc = {

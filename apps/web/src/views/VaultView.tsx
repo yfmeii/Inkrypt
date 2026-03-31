@@ -21,9 +21,8 @@ import { Toast, ToastStack } from '../components/Toast'
 import { SettingsPanel } from '../components/SettingsPanel'
 import { SearchDialog } from '../components/SearchDialog'
 import { useYjsSync } from '../hooks/useYjsSync'
-import { detectNoteFormat, migrateToYjs, type YjsNotePayload } from '../lib/yjs/migration'
-import type { NotePayloadWithYjs } from '../lib/yjs/syncController'
-import { encodeYDoc, mergeYDocs } from '../lib/yjs/serializer'
+import { detectNoteFormat, migrateToYjs, encodeYDoc, mergeYDocs } from '../lib/yjs'
+import type { NotePayloadWithYjs, YjsNotePayload } from '../lib/yjs'
 import { countAttachmentRefs, useVaultAttachments } from './vault/attachments'
 import {
   type LocalDraftInfo,
@@ -43,15 +42,15 @@ import {
 } from './vault/VaultDialogs'
 import { VaultEditorHeader } from './vault/VaultEditorHeader'
 import { VaultSidebar } from './vault/VaultSidebar'
+import { loadNotesFromIdb as loadNotesFromIdbState } from './vault/lifecycle.local'
 import {
   createNotePersistence,
-  createVaultSyncApi,
   deleteNotePersistence,
-  loadNotesFromIdb as loadNotesFromIdbState,
-  migrateLegacyNotesInBackground as migrateLegacyNotesInBackgroundState,
   syncNotesFromRemote,
-  type SyncSavedRecord,
-} from './vault/lifecycle'
+} from './vault/lifecycle.remote'
+import { createVaultSyncApi } from './vault/lifecycle.sync-api'
+import { migrateLegacyNotesInBackground as migrateLegacyNotesInBackgroundState } from './vault/lifecycle.migration'
+import { type SyncSavedRecord } from './vault/lifecycle.shared'
 import { buildSyncButtonState, prepareSelectedSave, SYNC_BUSY_TEXT } from './vault/editor-state'
 import { buildSearchDialogResults, createSearchQueryState, SEARCH_PAGE_SIZE, useVaultSearchIndex, useVaultSearchResults } from './vault/search'
 import {

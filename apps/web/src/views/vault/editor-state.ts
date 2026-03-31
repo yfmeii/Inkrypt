@@ -1,6 +1,6 @@
 import type { NotePayload } from '../../lib/crypto'
-import type { SyncStatus } from '../../lib/yjs/syncController'
-import { clampNoteContentForStore } from './lifecycle'
+import type { SyncStatus } from '../../lib/yjs'
+import { clampNoteContentForStore } from './lifecycle.shared'
 
 export const SYNC_BUSY_TEXT = '正在同步…'
 

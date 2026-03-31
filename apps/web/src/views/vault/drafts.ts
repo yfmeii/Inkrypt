@@ -8,7 +8,10 @@ import {
   idbGetEncryptedNote,
   idbSetDraftNote,
 } from '../../lib/idb'
-import { detectNoteFormat, type YjsNotePayload } from '../../lib/yjs/migration'
+import {
+  detectNoteFormat,
+  type YjsNotePayload,
+} from '../../lib/yjs'
 import type { DecryptedNote } from '../../state/store'
 import { buildDraftSyncState, isDraftDirty, normalizeDraftTags, parseDraftTags, type DraftSyncState } from './draft-state'
 
