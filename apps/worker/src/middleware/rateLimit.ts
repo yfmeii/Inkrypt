@@ -89,11 +89,17 @@ async function checkRateLimitGlobal(args: {
     data = null
   }
 
+  const hasExpectedStatus = resp.status === 200 || resp.status === 429
+  const hasExpectedPayload = typeof data?.allowed === 'boolean'
+  if (!hasExpectedStatus || !hasExpectedPayload) {
+    throw new Error(`Rate limiter returned an invalid response (${resp.status})`)
+  }
+
   const limit = clampInt(data?.limit, 1, args.limit)
   const remaining = clampInt(data?.remaining, 0, 0)
   const resetAt = clampInt(data?.resetAt, 0, Date.now())
   const retryAfter = clampInt(data?.retryAfter, 0, 0)
-  const allowed = resp.status !== 429
+  const allowed = resp.status === 200 && data.allowed === true
 
   return { allowed, limit, remaining, resetAt, retryAfter }
 }

@@ -1,13 +1,17 @@
 import { generateAuthenticationOptions } from '@simplewebauthn/server'
 import type { Hono } from 'hono'
 import { z } from 'zod'
+import type { AppEnv } from '../../env'
+import { completeLoginCeremony } from '../../repositories/authTransactions'
 import {
   getCredentialForUser,
   listCredentialsByUserId,
-  updateCredentialUsage,
 } from '../../repositories/credentials'
-import type { AppEnv } from '../../env'
-import { reuseOrPersistChallenge } from '../../services/auth/challenge'
+import {
+  claimCeremonyForVerification,
+  markCeremonyFailed,
+  startAuthCeremony,
+} from '../../services/auth/ceremonies'
 import {
   buildLoginFinishResponse,
   buildLoginStartResponse,
@@ -17,82 +21,137 @@ import {
   verificationErrorResponse,
   verifyAuthentication,
 } from '../../services/auth/verification'
-import {
-  ensureUsernameMatches,
-  loadInitializedVaultUser,
-  parseJsonBody,
-  requireFreshChallengeValue,
-} from './shared'
-import { nowMs } from '../shared'
+import { loadInitializedVaultUser, parseJsonBody } from './shared'
+
+const loginStartRequestSchema = z.object({
+  credentialId: z.string().min(1).max(512).optional(),
+  clientRequestId: z.string().uuid().optional(),
+  capabilities: z.object({
+    prfEvalByCredential: z.boolean().optional(),
+  }).strict().optional(),
+}).strict()
+
+const loginFinishRequestSchema = z.object({
+  ceremonyId: z.string().uuid(),
+  assertion: z.unknown(),
+}).strict()
 
 export function registerAuthLoginRoutes(app: Hono<AppEnv>): void {
-  app.post('/login/start', async (c) => {
-    const body = await parseJsonBody(
-      c,
-      z.object({
-        username: z.string().trim().min(1).max(64).optional(),
-        credentialId: z.string().min(1).max(512).optional(),
-      }),
-    )
+  app.post('/login/start', async (context) => {
+    const body = await parseJsonBody(context, loginStartRequestSchema)
     if (body instanceof Response) return body
 
-    const user = await loadInitializedVaultUser(c)
-    if (user instanceof Response) return user
-    const usernameMismatch = ensureUsernameMatches(c, user.username, body.username)
-    if (usernameMismatch) return usernameMismatch
+    const vaultUser = await loadInitializedVaultUser(context)
+    if (vaultUser instanceof Response) return vaultUser
 
-    const creds = await listCredentialsByUserId(c.env.DB, user.id)
-    if (creds.length === 0) return c.json({ error: 'NO_CREDENTIALS' }, 400)
+    const credentials = await listCredentialsByUserId(context.env.DB, vaultUser.id)
+    if (credentials.length === 0) return context.json({ error: 'NO_CREDENTIALS' }, 400)
 
-    const selected =
-      (body.credentialId ? creds.find((x) => x.id === body.credentialId) : null) ??
-      creds[0]
+    const supportsMultiCredentialPrf = body.capabilities?.prfEvalByCredential === true
+    const preferredCredential = body.credentialId
+      ? credentials.find((credential) => credential.id === body.credentialId) ?? null
+      : null
+    const selectedCredential = preferredCredential ?? credentials[0]
+    const allowedCredentials = supportsMultiCredentialPrf
+      ? credentials.map((credential) => ({ id: credential.id }))
+      : [{ id: selectedCredential.id }]
 
     const options = await generateAuthenticationOptions({
-      rpID: c.env.RP_ID,
+      rpID: context.env.RP_ID,
       userVerification: 'required',
-      allowCredentials: [{ id: selected.id }],
+      allowCredentials: allowedCredentials,
+    })
+    const ceremony = await startAuthCeremony(context.env.DB, {
+      vaultId: vaultUser.id,
+      purpose: 'login',
+      challenge: options.challenge,
+      preferredCredentialId: supportsMultiCredentialPrf ? null : selectedCredential.id,
+      clientRequestId: body.clientRequestId,
     })
 
-    options.challenge = await reuseOrPersistChallenge(c.env.DB, user, options.challenge, nowMs())
-
-    return c.json(buildLoginStartResponse(options, selected), 200)
-  })
-
-  app.post('/login/finish', async (c) => {
-    const body = await parseJsonBody(
-      c,
-      z.object({
-        username: z.string().trim().min(1).max(64).optional(),
-        assertion: z.unknown(),
-      }),
-    )
-    if (body instanceof Response) return body
-
-    const user = await loadInitializedVaultUser(c)
-    if (user instanceof Response) return user
-    const usernameMismatch = ensureUsernameMatches(c, user.username, body.username)
-    if (usernameMismatch) return usernameMismatch
-
-    const challenge = requireFreshChallengeValue(c, user.current_challenge, nowMs())
-    if (challenge instanceof Response) return challenge
-
-    const assertion = body.assertion as any
-    const credentialId = assertion?.id
-    if (typeof credentialId !== 'string' || !credentialId) {
-      return c.json({ error: 'MISSING_CREDENTIAL_ID' }, 400)
+    if (!supportsMultiCredentialPrf) {
+      return context.json({
+        ...buildLoginStartResponse(options, selectedCredential),
+        protocolVersion: 2 as const,
+        ceremonyId: ceremony.id,
+        ceremonyExpiresAt: ceremony.expires_at,
+      }, 200)
     }
 
-    const credential = await getCredentialForUser(c.env.DB, user.id, credentialId)
-    if (!credential) return c.json({ error: 'CREDENTIAL_NOT_FOUND' }, 404)
+    return context.json({
+      options,
+      credentialPrfSalts: Object.fromEntries(
+        credentials.map((credential) => [credential.id, credential.prf_salt]),
+      ),
+      protocolVersion: 2 as const,
+      ceremonyId: ceremony.id,
+      ceremonyExpiresAt: ceremony.expires_at,
+    }, 200)
+  })
 
-    const verification = await verifyAuthentication(c.env, assertion, challenge, credential)
-    if (!verification.ok) return verificationErrorResponse(c, verification)
+  app.post('/login/finish', async (context) => {
+    const body = await parseJsonBody(context, loginFinishRequestSchema)
+    if (body instanceof Response) return body
 
-    const ts = nowMs()
-    await updateCredentialUsage(c.env.DB, credential.id, verification.value.newCounter, ts)
-    await finalizeSession(c, { userId: user.id, credentialId: credential.id })
+    const vaultUser = await loadInitializedVaultUser(context)
+    if (vaultUser instanceof Response) return vaultUser
 
-    return c.json(buildLoginFinishResponse(credential), 200)
+    const assertion = body.assertion as { id?: unknown }
+    const credentialId = typeof assertion?.id === 'string' ? assertion.id : null
+    if (!credentialId) return context.json({ error: 'MISSING_CREDENTIAL_ID' }, 400)
+
+    const claimed = await claimCeremonyForVerification(context, {
+      ceremonyId: body.ceremonyId,
+      vaultId: vaultUser.id,
+      purpose: 'login',
+      response: body.assertion,
+    })
+    if (claimed instanceof Response) return claimed
+    if (
+      claimed.ceremony.preferred_credential_id &&
+      claimed.ceremony.preferred_credential_id !== credentialId
+    ) {
+      await markCeremonyFailed(context.env.DB, {
+        ceremonyId: body.ceremonyId,
+        responseHash: claimed.responseHash,
+        failureCode: 'CREDENTIAL_NOT_FOUND',
+      })
+      return context.json({ error: 'CREDENTIAL_NOT_FOUND' }, 404)
+    }
+
+    const credential = await getCredentialForUser(context.env.DB, vaultUser.id, credentialId)
+    if (!credential) return context.json({ error: 'CREDENTIAL_NOT_FOUND' }, 404)
+
+    const verification = await verifyAuthentication(
+      context.env,
+      body.assertion,
+      claimed.ceremony.challenge,
+      credential,
+    )
+    if (!verification.ok) {
+      await markCeremonyFailed(context.env.DB, {
+        ceremonyId: body.ceremonyId,
+        responseHash: claimed.responseHash,
+        failureCode: verification.error,
+      })
+      return verificationErrorResponse(context, verification)
+    }
+
+    const completed = await completeLoginCeremony(context.env.DB, {
+      ceremonyId: body.ceremonyId,
+      vaultId: vaultUser.id,
+      credentialId: credential.id,
+      previousCounter: credential.counter ?? 0,
+      newCounter: verification.value.newCounter,
+      responseHash: claimed.responseHash,
+      now: Date.now(),
+    })
+    if (!completed) return context.json({ error: 'CEREMONY_REPLAYED' }, 409)
+
+    await finalizeSession(context, {
+      userId: vaultUser.id,
+      credentialId: credential.id,
+    })
+    return context.json(buildLoginFinishResponse(credential), 200)
   })
 }

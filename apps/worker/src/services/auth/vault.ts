@@ -13,14 +13,3 @@ export async function loadSingleVaultUser(
     return c.json({ error: 'MULTI_USER_UNSUPPORTED' }, 400)
   }
 }
-
-export function validateUsernameMatch(
-  c: Context<AppEnv>,
-  actualUsername: string,
-  providedUsername?: string,
-): Response | null {
-  if (providedUsername && providedUsername !== actualUsername) {
-    return c.json({ error: 'USERNAME_MISMATCH' }, 400)
-  }
-  return null
-}

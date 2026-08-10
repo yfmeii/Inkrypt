@@ -93,6 +93,8 @@ beforeEach(() => {
   vi.mocked(hasJoinedHandshake).mockReturnValue(false)
   vi.mocked(hasConfirmedHandshake).mockReturnValue(false)
   vi.mocked(isHandshakeOwner).mockReturnValue(true)
+  vi.mocked(updateHandshakeJoin).mockResolvedValue(true)
+  vi.mocked(updateHandshakePayload).mockResolvedValue(true)
   vi.mocked(buildAliceHandshakeStatus).mockReturnValue({
     status: 'waiting_confirm',
     expiresAt: 2_000,
@@ -157,7 +159,21 @@ describe('workflows', () => {
 
     expect(result).toEqual({ ok: true, value: { expiresAt: 2_000 } })
     expect(nextHandshakeExpiry).toHaveBeenCalledWith(1_000)
-    expect(updateHandshakeJoin).toHaveBeenCalledWith(db, '123456', '{"kty":"EC","x":"1"}', 2_000)
+    expect(updateHandshakeJoin).toHaveBeenCalledWith(db, '123456', '{"kty":"EC","x":"1"}', 2_000, 1_000)
+  })
+
+  it('rejects a concurrent join that loses the conditional update', async () => {
+    vi.mocked(resolveActiveHandshake).mockResolvedValue({ ok: true, handshake: makeHandshake() })
+    vi.mocked(updateHandshakeJoin).mockResolvedValueOnce(false)
+
+    const result = await joinHandshake({
+      db,
+      sessionCode: '123456',
+      sessionSecret: 'secret',
+      publicKey: { bob: true },
+    })
+
+    expect(result).toEqual({ ok: false, error: 'ALREADY_JOINED' })
   })
 
   it('hides alice status from non-owners', async () => {
@@ -242,6 +258,31 @@ describe('workflows', () => {
 
     expect(result).toEqual({ ok: true, value: { expiresAt: 2_000 } })
     expect(nextHandshakeExpiry).toHaveBeenCalledWith(1_000)
-    expect(updateHandshakePayload).toHaveBeenCalledWith(db, '123456', 'cipher', 'iv', 2_000)
+    expect(updateHandshakePayload).toHaveBeenCalledWith(
+      db,
+      '123456',
+      'cipher',
+      'iv',
+      2_000,
+      'alice-id',
+      1_000,
+    )
+  })
+
+  it('rejects a concurrent confirmation that loses the conditional update', async () => {
+    vi.mocked(resolveActiveHandshake).mockResolvedValue({ ok: true, handshake: makeHandshake() })
+    vi.mocked(hasJoinedHandshake).mockReturnValueOnce(true)
+    vi.mocked(updateHandshakePayload).mockResolvedValueOnce(false)
+
+    const result = await confirmHandshake({
+      db,
+      sessionCode: '123456',
+      sessionSecret: 'secret',
+      userId: 'alice-id',
+      encryptedPayload: 'cipher',
+      iv: 'iv',
+    })
+
+    expect(result).toEqual({ ok: false, error: 'ALREADY_CONFIRMED' })
   })
 })

@@ -11,6 +11,10 @@ export type DbCredential = {
   encryption_iv: string
   last_used_at: number | null
   created_at: number | null
+  revoked_at?: number | null
+  updated_at?: number | null
+  created_by_ceremony_id?: string | null
+  last_auth_ceremony_id?: string | null
 }
 
 export async function countCredentialsByUserId(
@@ -18,7 +22,7 @@ export async function countCredentialsByUserId(
   userId: string,
 ): Promise<number> {
   const row = await db
-    .prepare('SELECT COUNT(1) AS c FROM credentials WHERE user_id = ?')
+    .prepare('SELECT COUNT(1) AS c FROM credentials WHERE user_id = ? AND revoked_at IS NULL')
     .bind(userId)
     .first<{ c: number }>()
 
@@ -31,7 +35,7 @@ export async function listCredentialsByUserId(
 ): Promise<DbCredential[]> {
   const res = await db
     .prepare(
-      'SELECT * FROM credentials WHERE user_id = ? ORDER BY COALESCE(last_used_at, created_at) DESC',
+      'SELECT * FROM credentials WHERE user_id = ? AND revoked_at IS NULL ORDER BY COALESCE(last_used_at, created_at) DESC',
     )
     .bind(userId)
     .all<DbCredential>()
@@ -44,7 +48,7 @@ export async function getCredentialById(
   credentialId: string,
 ): Promise<DbCredential | null> {
   const row = await db
-    .prepare('SELECT * FROM credentials WHERE id = ? LIMIT 1')
+    .prepare('SELECT * FROM credentials WHERE id = ? AND revoked_at IS NULL LIMIT 1')
     .bind(credentialId)
     .first<DbCredential>()
 
@@ -57,14 +61,14 @@ export async function getCredentialForUser(
   credentialId: string,
 ): Promise<DbCredential | null> {
   const row = await db
-    .prepare('SELECT * FROM credentials WHERE id = ? AND user_id = ? LIMIT 1')
+    .prepare('SELECT * FROM credentials WHERE id = ? AND user_id = ? AND revoked_at IS NULL LIMIT 1')
     .bind(credentialId, userId)
     .first<DbCredential>()
 
   return row ?? null
 }
 
-export async function upsertCredential(
+export async function insertCredential(
   db: D1Database,
   credential: DbCredential,
 ): Promise<void> {
@@ -73,17 +77,8 @@ export async function upsertCredential(
       `INSERT INTO credentials (
         id, user_id, public_key, device_name, counter,
         prf_salt, wrapped_master_key, encryption_iv,
-        last_used_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        user_id=excluded.user_id,
-        public_key=excluded.public_key,
-        device_name=excluded.device_name,
-        counter=excluded.counter,
-        prf_salt=excluded.prf_salt,
-        wrapped_master_key=excluded.wrapped_master_key,
-        encryption_iv=excluded.encryption_iv,
-        last_used_at=excluded.last_used_at`,
+        last_used_at, created_at, updated_at, created_by_ceremony_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       credential.id,
@@ -96,9 +91,13 @@ export async function upsertCredential(
       credential.encryption_iv,
       credential.last_used_at,
       credential.created_at,
+      credential.updated_at ?? credential.created_at,
+      credential.created_by_ceremony_id ?? null,
     )
     .run()
 }
+
+export const upsertCredential = insertCredential
 
 export async function updateCredentialUsage(
   db: D1Database,
@@ -107,8 +106,8 @@ export async function updateCredentialUsage(
   lastUsedAt: number,
 ): Promise<void> {
   await db
-    .prepare('UPDATE credentials SET counter = ?, last_used_at = ? WHERE id = ?')
-    .bind(counter, lastUsedAt, credentialId)
+    .prepare('UPDATE credentials SET counter = ?, last_used_at = ?, updated_at = ? WHERE id = ? AND revoked_at IS NULL')
+    .bind(counter, lastUsedAt, lastUsedAt, credentialId)
     .run()
 }
 
@@ -119,15 +118,33 @@ export async function updateCredentialDeviceName(
   deviceName: string | null,
 ): Promise<void> {
   await db
-    .prepare('UPDATE credentials SET device_name = ? WHERE id = ? AND user_id = ?')
-    .bind(deviceName, credentialId, userId)
+    .prepare('UPDATE credentials SET device_name = ?, updated_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL')
+    .bind(deviceName, Date.now(), credentialId, userId)
     .run()
 }
 
-export async function deleteCredentialForUser(
+export async function deleteCredentialUnlessLast(
   db: D1Database,
   userId: string,
   credentialId: string,
-): Promise<void> {
-  await db.prepare('DELETE FROM credentials WHERE id = ? AND user_id = ?').bind(credentialId, userId).run()
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE credentials
+       SET revoked_at = ?, updated_at = ?
+       WHERE id = ?
+         AND user_id = ?
+         AND revoked_at IS NULL
+         AND EXISTS (
+           SELECT 1
+           FROM credentials AS other
+           WHERE other.user_id = credentials.user_id
+             AND other.revoked_at IS NULL
+             AND other.id <> credentials.id
+         )`,
+    )
+    .bind(Date.now(), Date.now(), credentialId, userId)
+    .run()
+
+  return (result.meta?.changes ?? 0) === 1
 }

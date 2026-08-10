@@ -1,10 +1,11 @@
 import type { D1Database } from '../../cloudflare'
 import {
-  createHandshake,
-  deleteHandshake,
+  cancelPairingHandshake,
+  createPairingHandshake,
   updateHandshakeJoin,
   updateHandshakePayload,
 } from '../../repositories/handshakes'
+import { buildDeviceGrant } from '../auth/deviceGrants'
 import {
   generateSessionCode,
   generateSessionSecret,
@@ -77,7 +78,16 @@ export async function initHandshake(
   const sessionSecretHash = await hashSessionSecret(sessionSecret)
 
   for (const sessionCode of codesToTry) {
-    const created = await createHandshake(input.db, {
+    const { grant } = await buildDeviceGrant({
+      vaultId: input.userId,
+      source: 'pairing',
+      state: 'pending',
+      secret: sessionSecret,
+      now: createdAt,
+    })
+    const created = await createPairingHandshake(input.db, {
+      grant,
+      handshake: {
       session_code: sessionCode,
       user_id: input.userId,
       session_secret_hash: sessionSecretHash,
@@ -87,6 +97,11 @@ export async function initHandshake(
       payload_iv: null,
       created_at: createdAt,
       expires_at: expiresAt,
+      state: 'waiting_join',
+      device_grant_id: grant.id,
+      protocol_version: 2,
+      version: 0,
+      },
     })
 
     if (created) {
@@ -117,7 +132,15 @@ export async function joinHandshake(
   if (!bobPublicKey) return { ok: false, error: 'INVALID_PUBLIC_KEY' }
 
   const expiresAt = nextHandshakeExpiry(ts)
-  await updateHandshakeJoin(input.db, resolved.handshake.session_code, bobPublicKey, expiresAt)
+  const joined = await updateHandshakeJoin(
+    input.db,
+    resolved.handshake.session_code,
+    bobPublicKey,
+    expiresAt,
+    ts,
+  )
+  if (!joined) return { ok: false, error: 'ALREADY_JOINED' }
+
   return { ok: true, value: { expiresAt } }
 }
 
@@ -178,13 +201,17 @@ export async function confirmHandshake(
   }
 
   const expiresAt = nextHandshakeExpiry(ts)
-  await updateHandshakePayload(
+  const confirmed = await updateHandshakePayload(
     input.db,
     resolved.handshake.session_code,
     input.encryptedPayload,
     input.iv,
     expiresAt,
+    input.userId,
+    ts,
   )
+  if (!confirmed) return { ok: false, error: 'ALREADY_CONFIRMED' }
+
   return { ok: true, value: { expiresAt } }
 }
 
@@ -200,6 +227,6 @@ export async function cancelHandshake(
   }
   if (!isHandshakeOwner(resolved.handshake, input.userId)) return { ok: false, error: 'FORBIDDEN' }
 
-  await deleteHandshake(input.db, resolved.handshake.session_code)
+  await cancelPairingHandshake(input.db, resolved.handshake.session_code, nowMs())
   return { ok: true, value: { ok: true } }
 }

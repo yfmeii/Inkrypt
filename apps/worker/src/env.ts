@@ -9,6 +9,11 @@ export type Bindings = {
   CORS_ORIGIN: string
   COOKIE_SAMESITE: string
   SESSION_SECRET: string
+  SETUP_TOKEN?: string
+  VAULT_USERNAME?: string
+  ENVIRONMENT?: string
+  TENANCY_MODE?: string
+  RELEASE_SHA?: string
   RATE_LIMIT_DISABLED?: string
 }
 

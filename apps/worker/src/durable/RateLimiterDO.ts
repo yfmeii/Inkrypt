@@ -31,6 +31,9 @@ export class RateLimiterDO implements DurableObject {
   }
 
   async fetch(request: Request): Promise<Response> {
+    if (request.method === 'GET') {
+      return Response.json({ ok: true }, { status: 200 })
+    }
     if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
     let body: CheckRequest | null = null
@@ -71,4 +74,3 @@ export class RateLimiterDO implements DurableObject {
     return Response.json(res, { status: allowed ? 200 : 429 })
   }
 }
-

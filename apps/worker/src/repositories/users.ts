@@ -3,7 +3,6 @@ import type { D1Database } from '../cloudflare'
 export type DbUser = {
   id: string
   username: string
-  current_challenge: string | null
   created_at: number
 }
 
@@ -26,22 +25,14 @@ export async function getUserById(db: D1Database, userId: string): Promise<DbUse
 
 export async function createUser(
   db: D1Database,
-  user: Pick<DbUser, 'id' | 'username' | 'current_challenge' | 'created_at'>,
+  user: Pick<DbUser, 'id' | 'username' | 'created_at'>,
 ): Promise<void> {
   await db
     .prepare(
-      'INSERT INTO users (id, username, current_challenge, created_at) VALUES (?, ?, ?, ?)',
+      'INSERT INTO users (id, username, created_at) VALUES (?, ?, ?)',
     )
-    .bind(user.id, user.username, user.current_challenge, user.created_at)
+    .bind(user.id, user.username, user.created_at)
     .run()
-}
-
-export async function setUserChallenge(
-  db: D1Database,
-  userId: string,
-  challenge: string | null,
-): Promise<void> {
-  await db.prepare('UPDATE users SET current_challenge = ? WHERE id = ?').bind(challenge, userId).run()
 }
 
 export async function getSingleVaultUser(db: D1Database): Promise<DbUser | null> {

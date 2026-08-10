@@ -77,9 +77,7 @@ export function verificationErrorResponse(
   verification: Extract<VerificationResult<unknown>, { ok: false }>,
 ): Response {
   return c.json(
-    verification.message
-      ? { error: verification.error, message: verification.message }
-      : { error: verification.error },
+    { error: verification.error },
     400,
   )
 }
