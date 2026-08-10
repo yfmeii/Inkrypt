@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@inkrypt/contracts": "workspace:*",
     "@scure/bip39": "^2.0.1",
     "@simplewebauthn/server": "^13.3.0",
     "hono": "^4.12.8",
