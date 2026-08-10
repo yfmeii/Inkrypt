@@ -3,17 +3,32 @@ import { encodeYDoc, decodeYDoc, mergeYDocs } from './serializer'
 import { YjsDocManager } from './docManager'
 import { randomBytes, bytesToHex } from '../crypto'
 
+export type SavedNoteReceipt = {
+  noteId: string
+  version: number
+  changeSequence: string
+  updatedAt: number
+  savedPayload: NotePayloadWithYjs
+}
+
 export type SyncStatus = 
   | { type: 'idle' }
   | { type: 'syncing' }
   | { type: 'success'; mergedRemote: boolean }
   | { type: 'error'; message: string; canRetry: boolean }
 
-export interface SyncResult {
-  success: boolean
-  mergedRemote: boolean
-  error?: string
-}
+export type SyncResult =
+  | {
+      success: true
+      mergedRemote: boolean
+      snapshotAcknowledged: boolean
+      receipt: SavedNoteReceipt
+    }
+  | {
+      success: false
+      mergedRemote: false
+      error: string
+    }
 
 export interface NotePayloadWithYjs {
   meta: {
@@ -64,7 +79,7 @@ export class SyncController {
     private docManager: YjsDocManager,
     private api: {
       getNote: (noteId: string) => Promise<NotePayloadWithYjs | null>
-      putNote: (noteId: string, payload: NotePayloadWithYjs) => Promise<void>
+      putNote: (noteId: string, payload: NotePayloadWithYjs) => Promise<SavedNoteReceipt>
     }
   ) {}
 
@@ -138,18 +153,17 @@ export class SyncController {
         updatedBy: getDeviceId()
       }
     }
-    await this.api.putNote(noteId, payload)
+    const receipt = await this.api.putNote(noteId, payload)
 
-    // Step 5: Verify
-    const verified = await this.api.getNote(noteId)
-    if (verified?.yjsSnapshotB64 !== mergedSnapshot) {
-      // 验证失败，有人同时写入
-      return { success: false, mergedRemote }
+    // Only acknowledge the exact captured state. Edits made while the request was
+    // in flight stay dirty and are coalesced into the next save.
+    const snapshotAcknowledged = this.docManager.markSyncedIfUnchanged(mergedSnapshot)
+    return {
+      success: true,
+      mergedRemote,
+      snapshotAcknowledged,
+      receipt,
     }
-
-    // 成功
-    this.docManager.markSynced(mergedSnapshot)
-    return { success: true, mergedRemote }
   }
 
   private setStatus(status: SyncStatus): void {

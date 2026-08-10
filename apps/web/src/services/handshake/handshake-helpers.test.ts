@@ -81,7 +81,13 @@ describe('handshake helper behavior', () => {
     expect(hasConfirmedHandshake({ encrypted_payload: null, payload_iv: 'iv-only' })).toBe(true)
 
     expect(nextHandshakeExpiry(1_000)).toBe(1_000 + JOIN_TTL_MS)
-    expect(serializePublicKey({ kty: 'EC', crv: 'P-256' })).toBe('{"kty":"EC","crv":"P-256"}')
+    const publicKey = {
+      kty: 'EC',
+      crv: 'P-256',
+      x: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      y: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+    }
+    expect(serializePublicKey(publicKey)).toBe(JSON.stringify(publicKey))
   })
 
   test('serializePublicKey rejects circular and oversized values', () => {

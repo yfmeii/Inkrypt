@@ -344,6 +344,7 @@ export function cancelPendingDraftPersistence(args: {
   effects: Pick<DraftPersistenceEffects, 'clearScheduled' | 'cancelIdle'>
 }): void {
   const { refs, effects } = args
+  refs.localDraftSaveRunIdRef.current += 1
   if (refs.localDraftSaveTimerRef.current) effects.clearScheduled(refs.localDraftSaveTimerRef.current)
   if (refs.localDraftSaveIdleHandleRef.current) effects.cancelIdle(refs.localDraftSaveIdleHandleRef.current)
   refs.localDraftSaveTimerRef.current = null
@@ -397,6 +398,7 @@ export function scheduleDraftPersistence(args: {
           }
 
           const encrypted = await effects.encryptPayload(noteId, payload, masterKey)
+          if (refs.localDraftSaveRunIdRef.current !== runId) return
           const savedAt = effects.now()
           await effects.setDraft({
             v: 1,

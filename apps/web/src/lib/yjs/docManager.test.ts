@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, vi } from 'vitest'
 import * as Y from 'yjs'
 import { YjsDocManager } from './docManager'
 import { encodeYDoc } from './serializer'
+import { isYjsBodyInitialized } from './bodyState'
 
 describe('YjsDocManager', () => {
   let manager: YjsDocManager
@@ -40,7 +41,8 @@ describe('YjsDocManager', () => {
       
       const state = manager.getState()
       expect(state?.noteId).toBe('note-2')
-      expect(state?.lastSyncedSnapshot).toBe(snapshot)
+      expect(isYjsBodyInitialized(doc)).toBe(true)
+      expect(state?.lastSyncedSnapshot).toBe(encodeYDoc(doc))
     })
 
     test('cleans up old listeners when re-initializing', async () => {
@@ -60,6 +62,15 @@ describe('YjsDocManager', () => {
       const state = manager.getState()
       expect(state?.noteId).toBe('note-2')
       expect(state?.doc).toBe(doc2)
+    })
+
+    test('preserves restored local changes as dirty', async () => {
+      const originalDoc = new Y.Doc()
+      originalDoc.getText('content').insert(0, 'offline edit')
+
+      await manager.initialize('note-1', encodeYDoc(originalDoc), { dirty: true })
+
+      expect(manager.isDirty()).toBe(true)
     })
   })
 
@@ -215,7 +226,7 @@ describe('YjsDocManager', () => {
       expect(state).not.toBeNull()
       expect(state?.noteId).toBe('note-1')
       expect(state?.dirty).toBe(false)
-      expect(state?.lastSyncedSnapshot).toBe(snapshot)
+      expect(state?.lastSyncedSnapshot).toBe(encodeYDoc(state!.doc))
       expect(state?.doc).toBeInstanceOf(Y.Doc)
     })
   })

@@ -1,22 +1,22 @@
 import type { StateCreator } from 'zustand'
 import {
   clearRememberedUnlockedSession,
-  loadRememberedUnlockedSession,
   rememberUnlockedSession,
 } from '../lib/remember'
-import type { InkryptState, SessionSlice } from './types'
+import type { InkryptState, SessionCommandsSlice } from './types'
 
-export const createSessionSlice: StateCreator<InkryptState, [], [], SessionSlice> = (set, get) => ({
-  masterKey: null,
-  credentialId: null,
-  deviceName: null,
-  pairingPrefillSecret: null,
-
+export const createSessionCommandsSlice: StateCreator<
+  InkryptState,
+  [],
+  [],
+  SessionCommandsSlice
+> = (set) => ({
   setSession: ({ masterKey, credentialId, deviceName, remember }) => {
     set({
       masterKey,
       credentialId: credentialId ?? null,
       deviceName: deviceName ?? null,
+      apiSessionStatus: 'authenticated',
     })
 
     if (remember) {
@@ -30,32 +30,18 @@ export const createSessionSlice: StateCreator<InkryptState, [], [], SessionSlice
     }
   },
 
-  setDeviceName: (deviceName) => set({ deviceName }),
-
-  setPairingPrefillSecret: (secret) => set({ pairingPrefillSecret: secret }),
-
-  consumePairingPrefillSecret: () => {
-    const secret = get().pairingPrefillSecret
-    if (!secret) return null
-    set({ pairingPrefillSecret: null })
-    return secret
-  },
-
-  hydrateRememberedSession: async () => {
-    const state = get()
-    if (state.masterKey) return
-    try {
-      const remembered = await loadRememberedUnlockedSession()
-      if (!remembered) return
-
-      set({
-        masterKey: remembered.masterKey,
-        credentialId: remembered.credentialId,
-        deviceName: remembered.deviceName,
-      })
-    } catch {
-      void clearRememberedUnlockedSession().catch(() => null)
-    }
+  revokeSession: () => {
+    void clearRememberedUnlockedSession().catch(() => null)
+    set({
+      masterKey: null,
+      credentialId: null,
+      deviceName: null,
+      apiSessionStatus: 'revoked',
+      apiSessionExpiresAt: null,
+      notes: [],
+      noteVersionWatermarks: {},
+      selectedNoteId: null,
+    })
   },
 
   lock: () => {
@@ -64,7 +50,10 @@ export const createSessionSlice: StateCreator<InkryptState, [], [], SessionSlice
       masterKey: null,
       credentialId: null,
       deviceName: null,
+      apiSessionStatus: 'anonymous',
+      apiSessionExpiresAt: null,
       notes: [],
+      noteVersionWatermarks: {},
       selectedNoteId: null,
     })
   },

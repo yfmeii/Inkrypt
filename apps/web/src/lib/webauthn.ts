@@ -71,3 +71,30 @@ export async function startAuthenticationWithPrf(
 
   return { assertion, prfOutput }
 }
+
+export async function startAuthenticationWithCredentialPrf(
+  optionsJSON: any,
+  prfSaltsByCredential: Record<string, Uint8Array>,
+): Promise<{ assertion: AuthenticationResponseJSON; prfOutput: Bytes }> {
+  const options = {
+    ...optionsJSON,
+    extensions: {
+      ...(optionsJSON?.extensions ?? {}),
+      prf: {
+        evalByCredential: Object.fromEntries(
+          Object.entries(prfSaltsByCredential).map(([credentialId, prfSalt]) => [
+            credentialId,
+            { first: prfSalt },
+          ]),
+        ),
+      },
+    },
+  }
+
+  const assertion = await startAuthentication({ optionsJSON: options })
+  const prfOutput = extractPrfResultFirst(assertion.clientExtensionResults)
+  if (!prfOutput) {
+    throw new Error('当前浏览器或 Passkey 不支持多凭据 PRF。请使用本设备最近登录的 Passkey，或更新浏览器后重试')
+  }
+  return { assertion, prfOutput }
+}

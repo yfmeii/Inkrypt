@@ -1,42 +1,44 @@
-import type { MutableRefObject } from 'react'
-import { ApiError, getJSON, postJSON } from '../../lib/api'
+import { saveNoteResponseSchema } from '@inkrypt/contracts/notes'
+import type { CanonicalNoteSession } from '../../application/notes/canonicalNoteSession'
+import { ApiError, getJSON, putJSON } from '../../lib/api'
 import { decryptNotePayload, encryptNotePayload, noteAad, type Bytes, type NotePayload } from '../../lib/crypto'
 import type { NotePayloadWithYjs } from '../../lib/yjs'
-import type { DecryptedNote } from '../../state/store'
-import { NotesGetResponse, NotesPostResponse, type SyncSavedRecord } from './lifecycle.shared'
 
 export function createVaultSyncApi(args: {
   masterKey: Bytes | null
-  draftStateRef: MutableRefObject<{
-    title: string
-    tags: string[]
-    is_favorite: boolean
-    attachments: Record<string, string>
-    content: string
-    createdAt: number
-  }>
-  selectedRef: MutableRefObject<DecryptedNote | null>
-  syncRemoteVersionRef: MutableRefObject<number>
-  syncSavedRef: MutableRefObject<SyncSavedRecord | null>
+  session: CanonicalNoteSession
 }) {
   return {
     getNote: async (noteId: string) => {
       if (!args.masterKey) return null
-      const res = await getJSON<NotesGetResponse>('/api/notes?since=0')
-      const record = res.notes.find((note) => note.id === noteId && !note.is_deleted) ?? null
-      if (!record) {
-        args.syncRemoteVersionRef.current = 0
-        return null
+      let res
+      try {
+        res = await getJSON(
+          `/api/notes/${encodeURIComponent(noteId)}`,
+          saveNoteResponseSchema,
+        )
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          args.session.recordRemoteVersion(noteId, 0)
+          return null
+        }
+        throw error
       }
+      const record = res.note
 
-      args.syncRemoteVersionRef.current = record.version
+      if (!args.session.recordRemoteVersion(noteId, record.version)) {
+        throw new Error('笔记会话已切换，已取消旧笔记同步')
+      }
+      if (record.is_deleted) throw new Error('该笔记已在其他设备删除，请恢复为新笔记后再保存')
       const payload = await decryptNotePayload(args.masterKey, record.encrypted_data, record.data_iv, noteAad(noteId))
       return payload as NotePayloadWithYjs
     },
     putNote: async (noteId: string, payload: NotePayloadWithYjs) => {
       if (!args.masterKey) throw new Error('No master key')
+      const saveContext = args.session.getSaveContext(noteId)
+      if (!saveContext) throw new Error('笔记会话尚未准备完成')
 
-      const draft = args.draftStateRef.current
+      const draft = saveContext.draft
       const mergedPayload: NotePayloadWithYjs = {
         ...payload,
         content: draft.content,
@@ -55,15 +57,14 @@ export function createVaultSyncApi(args: {
       }
       const encrypted = await encryptNotePayload(args.masterKey, payloadForEncrypt, noteAad(noteId))
 
-      let res: NotesPostResponse
+      let res
       try {
-        res = await postJSON<NotesPostResponse>('/api/notes', [{
-          id: noteId,
+        res = await putJSON(`/api/notes/${encodeURIComponent(noteId)}`, {
           encrypted_data: encrypted.encrypted_data,
-          iv: encrypted.iv,
-          base_version: args.syncRemoteVersionRef.current || args.selectedRef.current?.version || 0,
+          data_iv: encrypted.iv,
+          base_version: saveContext.baseVersion,
           is_deleted: false,
-        }])
+        }, saveNoteResponseSchema)
       } catch (error) {
         if (error instanceof ApiError && error.status === 409) {
           throw new Error('同步繁忙，请稍后再试')
@@ -71,12 +72,14 @@ export function createVaultSyncApi(args: {
         throw error
       }
 
-      if (res.conflicts.includes(noteId)) {
-        throw new Error('同步繁忙，请稍后再试')
+      args.session.recordRemoteVersion(noteId, res.note.version)
+      return {
+        noteId: res.note.id,
+        version: res.note.version,
+        changeSequence: res.note.change_seq,
+        updatedAt: res.note.updated_at,
+        savedPayload: mergedPayload,
       }
-
-      const saved = res.saved.find((entry) => entry.id === noteId)
-      if (saved) args.syncSavedRef.current = saved
     },
   }
 }

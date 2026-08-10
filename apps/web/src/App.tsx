@@ -7,26 +7,33 @@ import { VaultView } from './views/VaultView'
 
 export function App() {
   const unlocked = useInkryptStore((s) => Boolean(s.masterKey))
+  const apiSessionStatus = useInkryptStore((s) => s.apiSessionStatus)
   const hydrateRememberedSession = useInkryptStore((s) => s.hydrateRememberedSession)
+  const refreshApiSession = useInkryptStore((s) => s.refreshApiSession)
   const setPairingPrefillSecret = useInkryptStore((s) => s.setPairingPrefillSecret)
   const [hydrating, setHydrating] = useState(true)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const onRevoked = () => useInkryptStore.getState().lock()
+    const onRevoked = () => useInkryptStore.getState().revokeSession()
+    const onSessionExpired = () => useInkryptStore.getState().markApiSessionAnonymous()
     window.addEventListener('inkrypt:device-revoked', onRevoked as EventListener)
-    return () => window.removeEventListener('inkrypt:device-revoked', onRevoked as EventListener)
+    window.addEventListener('inkrypt:session-expired', onSessionExpired as EventListener)
+    return () => {
+      window.removeEventListener('inkrypt:device-revoked', onRevoked as EventListener)
+      window.removeEventListener('inkrypt:session-expired', onSessionExpired as EventListener)
+    }
   }, [])
 
   useEffect(() => {
     let alive = true
-    void hydrateRememberedSession().finally(() => {
+    void Promise.all([hydrateRememberedSession(), refreshApiSession()]).finally(() => {
       if (alive) setHydrating(false)
     })
     return () => {
       alive = false
     }
-  }, [hydrateRememberedSession])
+  }, [hydrateRememberedSession, refreshApiSession])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -61,5 +68,5 @@ export function App() {
     )
   }
 
-  return unlocked ? <VaultView /> : <AuthView />
+  return unlocked && apiSessionStatus === 'authenticated' ? <VaultView /> : <AuthView />
 }

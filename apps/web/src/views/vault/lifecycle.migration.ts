@@ -1,8 +1,9 @@
-import { ApiError, postJSON } from '../../lib/api'
+import { saveNoteResponseSchema } from '@inkrypt/contracts/notes'
+import { putJSON } from '../../lib/api'
 import { decryptNotePayload, encryptNotePayload, isLegacyNoteCiphertext, noteAad, type Bytes, type NotePayload } from '../../lib/crypto'
 import { idbGetAllEncryptedNotes, idbGetDraftNote, idbUpsertEncryptedNotes } from '../../lib/idb'
 import type { DecryptedNote } from '../../state/store'
-import { NotesPostResponse, toStoredPayload } from './lifecycle.shared'
+import { toStoredPayload } from './lifecycle.shared'
 
 export async function migrateLegacyNotesInBackground(args: {
   masterKey: Bytes | null
@@ -43,28 +44,26 @@ export async function migrateLegacyNotesInBackground(args: {
     const encrypted = await encryptNotePayload(args.masterKey, payload, noteAad(note.id))
     if (isLegacyNoteCiphertext(encrypted.encrypted_data)) continue
 
-    let res: NotesPostResponse
+    let response
     try {
-      res = await postJSON<NotesPostResponse>('/api/notes', [
-        { id: note.id, encrypted_data: encrypted.encrypted_data, iv: encrypted.iv, base_version: note.version, is_deleted: false },
-      ])
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 409) {
-        res = error.payload as NotesPostResponse
-      } else {
-        continue
-      }
+      response = await putJSON(`/api/notes/${encodeURIComponent(note.id)}`, {
+        encrypted_data: encrypted.encrypted_data,
+        data_iv: encrypted.iv,
+        base_version: note.version,
+        is_deleted: false,
+      }, saveNoteResponseSchema)
+    } catch {
+      continue
     }
 
-    if (res.conflicts.includes(note.id)) continue
-    const saved = res.saved.find((entry) => entry.id === note.id)
-    if (!saved) continue
+    const saved = response.note
 
     migrated += 1
     await idbUpsertEncryptedNotes([
       {
         id: note.id,
         version: saved.version,
+        change_seq: saved.change_seq,
         updated_at: saved.updated_at,
         is_deleted: 0,
         encrypted_data: encrypted.encrypted_data,

@@ -3,6 +3,7 @@ import { type DBSchema, openDB } from 'idb'
 export type EncryptedNoteRecord = {
   id: string
   version: number
+  change_seq?: string
   updated_at: number
   is_deleted: number
   encrypted_data: string
@@ -53,9 +54,32 @@ export async function idbUpsertEncryptedNotes(notes: EncryptedNoteRecord[]): Pro
   const db = await dbPromise
   const tx = db.transaction('notes', 'readwrite')
   for (const note of notes) {
+    const existing = await tx.store.get(note.id)
+    if (existing && existing.version >= note.version) continue
     await tx.store.put(note)
   }
   await tx.done
+}
+
+export async function idbApplyNoteChanges(
+  notes: EncryptedNoteRecord[],
+  nextCursor: string,
+): Promise<void> {
+  const db = await dbPromise
+  const transaction = db.transaction(['notes', 'meta'], 'readwrite')
+  for (const note of notes) {
+    const notesStore = transaction.objectStore('notes')
+    const existing = await notesStore.get(note.id)
+    if (existing && existing.version >= note.version) continue
+    await notesStore.put(note)
+  }
+  await transaction.objectStore('meta').put({ key: 'notes_sync_cursor_v1', value: nextCursor })
+  await transaction.done
+}
+
+export async function idbGetNotesSyncCursor(): Promise<string | null> {
+  const value = await idbGetMeta('notes_sync_cursor_v1')
+  return typeof value === 'string' && value ? value : null
 }
 
 export async function idbGetAllEncryptedNotes(): Promise<EncryptedNoteRecord[]> {

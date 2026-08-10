@@ -52,7 +52,11 @@ import '@blocknote/shadcn/style.css'
 import '../blocknote.css'
 import { markdownToBlocks, blocksToMarkdown } from '../lib/blocknote/converter'
 import { useInkryptStore } from '../state/store'
-import { BLOCKNOTE_YJS_INIT_ORIGIN, YjsBlockNoteBinding } from '../lib/yjs'
+import {
+  BLOCKNOTE_YJS_INIT_ORIGIN,
+  YjsBlockNoteBinding,
+  isYjsBodyInitialized,
+} from '../lib/yjs'
 import { DrawingCard } from './blocknote/DrawingCard'
 import { toDrawingPreviewUrl, toDrawingSceneUrl } from '../lib/drawing'
 
@@ -537,7 +541,6 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
     const rootRef = useRef<HTMLDivElement | null>(null)
     const [conversionError, setConversionError] = useState<{ error: Error; originalContent: string } | null>(null)
     const [retryCount, setRetryCount] = useState(0)
-    const suppressNextYjsDraftSyncRef = useRef(false)
 
     const dictionary = useMemo(() => ({ ...zh, placeholders: { ...zh.placeholders, default: placeholder, emptyDocument: placeholder } }), [placeholder])
 
@@ -567,21 +570,25 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
     // Create Yjs binding if yjsDoc is provided
     const yjsBindingRef = useRef<YjsBlockNoteBinding | null>(null)
 
-    const editor = useCreateBlockNote({
-      schema: customSchema,
-      uploadFile: createAttachmentUploader(onAddAttachmentRef),
-      resolveFileUrl: async (url: string) => resolveAttachmentUrl(url, attachmentsRef.current),
-      dictionary,
-      pasteHandler: ({ defaultPasteHandler }) => defaultPasteHandler({ prioritizeMarkdownOverHTML: true, plainTextAsMarkdown: true }),
-      // Yjs collaboration configuration
-      collaboration: yjsDoc ? {
-        fragment: yjsDoc.getXmlFragment('document-store'),
-        user: {
-          name: 'User',
-          color: '#ff0000'
-        }
-      } : undefined
-    })
+    const editor = useCreateBlockNote(
+      {
+        schema: customSchema,
+        uploadFile: createAttachmentUploader(onAddAttachmentRef),
+        resolveFileUrl: async (url: string) => resolveAttachmentUrl(url, attachmentsRef.current),
+        dictionary,
+        pasteHandler: ({ defaultPasteHandler }) => defaultPasteHandler({ prioritizeMarkdownOverHTML: true, plainTextAsMarkdown: true }),
+        // Collaboration is construction-time state in BlockNote. Recreate the
+        // editor whenever the active document identity changes.
+        collaboration: yjsDoc ? {
+          fragment: yjsDoc.getXmlFragment('document-store'),
+          user: {
+            name: 'User',
+            color: '#ff0000'
+          }
+        } : undefined
+      },
+      [yjsDoc],
+    )
 
     ;(editor as any).__inkryptOpenDrawing = onEditDrawing
     ;(editor as any).__inkryptDeleteDrawing = onDeleteDrawing
@@ -623,8 +630,7 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
       if (!yjsDoc || !onYjsDocChange) return
 
       const updateHandler = (_update: Uint8Array, origin: unknown) => {
-        const suppressDraftUpdate = suppressNextYjsDraftSyncRef.current || origin === BLOCKNOTE_YJS_INIT_ORIGIN
-        suppressNextYjsDraftSyncRef.current = false
+        const suppressDraftUpdate = origin === BLOCKNOTE_YJS_INIT_ORIGIN
         onYjsDocChange({ doc: yjsDoc, suppressDraftUpdate })
       }
 
@@ -636,25 +642,24 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
 
     useEffect(() => {
       if (!editor) return
+      let cancelled = false
       
-      // If using Yjs, only load initial content if the Y.Doc is empty
-      if (yjsDoc && yjsBindingRef.current) {
-        const fragment = yjsDoc.getXmlFragment('document-store')
-        // Check if Y.Doc already has content
-        if (fragment.length > 0) {
-          // Y.Doc already has content, don't overwrite
-          return
-        }
-      }
+      // A persisted empty document is valid. The explicit initialization
+      // marker distinguishes it from a new document that still needs the
+      // legacy content projection imported once.
+      if (yjsDoc && isYjsBodyInitialized(yjsDoc)) return
 
       const loadInitialContent = async () => {
+        const targetDocument = yjsDoc
+        const targetBinding = yjsBindingRef.current
         try {
           const blocks = await markdownToBlocks(editor as any, initialContentRef.current)
+          if (cancelled) return
           
           // If using Yjs, initialize the Y.Doc with blocks
-          if (yjsDoc && yjsBindingRef.current) {
-            suppressNextYjsDraftSyncRef.current = true
-            yjsBindingRef.current.initializeFromBlocks(blocks as any)
+          if (targetDocument && targetBinding) {
+            if (yjsBindingRef.current !== targetBinding) return
+            targetBinding.initializeFromBlocks(blocks as any)
           } else {
             // Otherwise, use the standard BlockNote API
             editor.replaceBlocks(editor.document, blocks as any)
@@ -667,7 +672,11 @@ export const BlockNoteComponent = forwardRef<BlockNoteComponentRef, BlockNoteCom
           onConversionError?.(err, initialContentRef.current)
         }
       }
-      loadInitialContent()
+      void loadInitialContent()
+
+      return () => {
+        cancelled = true
+      }
     }, [editor, retryCount, onConversionError, yjsDoc])
 
     const handleChange = useCallback(() => {

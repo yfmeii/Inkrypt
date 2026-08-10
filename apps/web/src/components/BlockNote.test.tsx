@@ -8,13 +8,24 @@ import type React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fc from 'fast-check'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useCreateBlockNote } from '@blocknote/react'
 import { BlockNoteComponent } from './BlockNote'
 import * as converter from '../lib/blocknote/converter'
 import { BLOCKNOTE_YJS_INIT_ORIGIN } from '../lib/yjs'
 
 const yjsListeners = new Map<string, Set<(...args: any[]) => void>>()
+const yjsMapValues = new Map<string, Map<string, unknown>>()
 const mockYjsDoc = {
   getXmlFragment: vi.fn(() => ({ length: 0 })),
+  getMap: vi.fn((mapName: string) => {
+    if (!yjsMapValues.has(mapName)) yjsMapValues.set(mapName, new Map())
+    const map = yjsMapValues.get(mapName)!
+    return {
+      get: (key: string) => map.get(key),
+      set: (key: string, value: unknown) => map.set(key, value),
+    }
+  }),
+  transact: vi.fn((callback: () => void) => callback()),
   on: vi.fn((event: string, handler: (...args: any[]) => void) => {
     if (!yjsListeners.has(event)) yjsListeners.set(event, new Set())
     yjsListeners.get(event)?.add(handler)
@@ -147,6 +158,7 @@ beforeEach(() => {
   mockEditor.document = []
   mockEditor.tryParseMarkdownToBlocks.mockResolvedValue([])
   yjsListeners.clear()
+  yjsMapValues.clear()
   mockYjsDoc.getXmlFragment.mockReturnValue({ length: 0 })
 })
 
@@ -337,6 +349,57 @@ describe('Paste handling', () => {
 })
 
 describe('Yjs change handling', () => {
+  it('does not repopulate an initialized empty Yjs document', async () => {
+    yjsMapValues.set('inkrypt-body-state', new Map([['initialized', true]]))
+    const markdownToBlocks = vi.spyOn(converter, 'markdownToBlocks')
+
+    render(
+      <BlockNoteComponent
+        initialContent="stale deleted content"
+        attachments={{}}
+        onChange={vi.fn()}
+        yjsDoc={mockYjsDoc as any}
+        onYjsDocChange={vi.fn()}
+      />,
+    )
+
+    await Promise.resolve()
+    expect(markdownToBlocks).not.toHaveBeenCalled()
+  })
+
+  it('recreates the editor when the Yjs document identity changes', () => {
+    const secondDocument = {
+      ...mockYjsDoc,
+      getXmlFragment: vi.fn(() => ({ length: 1 })),
+    }
+    const { rerender } = render(
+      <BlockNoteComponent
+        initialContent="Hello"
+        attachments={{}}
+        onChange={vi.fn()}
+        yjsDoc={mockYjsDoc as any}
+      />,
+    )
+
+    rerender(
+      <BlockNoteComponent
+        initialContent="Hello"
+        attachments={{}}
+        onChange={vi.fn()}
+        yjsDoc={secondDocument as any}
+      />,
+    )
+
+    expect(vi.mocked(useCreateBlockNote)).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        collaboration: expect.objectContaining({
+          fragment: expect.anything(),
+        }),
+      }),
+      [secondDocument],
+    )
+  })
+
   it('suppresses draft updates for initialization-originated Yjs changes', async () => {
     vi.spyOn(converter, 'markdownToBlocks').mockResolvedValueOnce([] as any)
     const onYjsDocChange = vi.fn()

@@ -16,6 +16,13 @@ type RememberCookieV1 = {
   deviceName: string | null
 }
 
+type RememberCookieV2 = {
+  v: 2
+  exp: number
+  ct: string
+  iv: string
+}
+
 function isBrowser(): boolean {
   return typeof document !== 'undefined' && typeof window !== 'undefined'
 }
@@ -95,8 +102,8 @@ async function decryptMasterKey(key: CryptoKey, ct: string, iv: string): Promise
 
 export async function rememberUnlockedSession(args: {
   masterKey: Bytes
-  credentialId: string | null
-  deviceName: string | null
+  credentialId?: string | null
+  deviceName?: string | null
   maxAgeSeconds?: number
 }): Promise<void> {
   if (!isBrowser()) return
@@ -104,13 +111,11 @@ export async function rememberUnlockedSession(args: {
   const key = await getOrCreateUnlockKey()
   const { ct, iv } = await encryptMasterKey(key, args.masterKey)
 
-  const payload: RememberCookieV1 = {
-    v: 1,
+  const payload: RememberCookieV2 = {
+    v: 2,
     exp: Date.now() + maxAgeSeconds * 1000,
     ct,
     iv,
-    credentialId: args.credentialId,
-    deviceName: args.deviceName,
   }
 
   setCookie(REMEMBER_COOKIE, JSON.stringify(payload), maxAgeSeconds)
@@ -118,17 +123,15 @@ export async function rememberUnlockedSession(args: {
 
 export async function loadRememberedUnlockedSession(): Promise<{
   masterKey: Bytes
-  credentialId: string | null
-  deviceName: string | null
 } | null> {
   if (!isBrowser()) return null
 
   const raw = getCookie(REMEMBER_COOKIE)
   if (!raw) return null
 
-  let payload: RememberCookieV1 | null = null
+  let payload: RememberCookieV1 | RememberCookieV2 | null = null
   try {
-    payload = JSON.parse(raw) as RememberCookieV1
+    payload = JSON.parse(raw) as RememberCookieV1 | RememberCookieV2
   } catch {
     deleteCookie(REMEMBER_COOKIE)
     return null
@@ -136,7 +139,7 @@ export async function loadRememberedUnlockedSession(): Promise<{
 
   if (
     !payload ||
-    payload.v !== 1 ||
+    (payload.v !== 1 && payload.v !== 2) ||
     typeof payload.exp !== 'number' ||
     !Number.isFinite(payload.exp) ||
     typeof payload.ct !== 'string' ||
@@ -160,11 +163,10 @@ export async function loadRememberedUnlockedSession(): Promise<{
   try {
     const masterKey = await decryptMasterKey(key, payload.ct, payload.iv)
     if (masterKey.byteLength !== 32) throw new Error('INVALID_MASTER_KEY')
-    return {
-      masterKey,
-      credentialId: payload.credentialId ?? null,
-      deviceName: payload.deviceName ?? null,
+    if (payload.v === 1) {
+      await rememberUnlockedSession({ masterKey })
     }
+    return { masterKey }
   } catch {
     await clearRememberedUnlockedSession()
     return null

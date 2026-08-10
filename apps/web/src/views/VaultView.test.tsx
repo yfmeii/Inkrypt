@@ -3,9 +3,43 @@ import { act, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { VaultView } from './VaultView'
 
-const { yjsSyncSpy, setDraftContentSpy, note } = vi.hoisted(() => ({
-  yjsSyncSpy: vi.fn(async () => ({ success: true, mergedRemote: false })),
-  setDraftContentSpy: vi.fn(),
+const {
+  yjsSyncSpy,
+  setDraftContentSpy,
+  cancelPendingLocalDraftSaveSpy,
+  resetAttachmentUiSpy,
+  loadSelectedDraftSnapshotSpy,
+  selectedDraftStateSetters,
+  note,
+} = vi.hoisted(() => {
+  const setDraftContent = vi.fn()
+  return {
+  yjsSyncSpy: vi.fn(async () => ({
+    success: true,
+    mergedRemote: false,
+    receipt: {
+      noteId: '11111111-1111-4111-8111-111111111111',
+      version: 2,
+      changeSequence: '2',
+      updatedAt: 100,
+    },
+  })),
+  setDraftContentSpy: setDraftContent,
+  cancelPendingLocalDraftSaveSpy: vi.fn(),
+  resetAttachmentUiSpy: vi.fn(),
+  loadSelectedDraftSnapshotSpy: vi.fn(async () => null),
+  selectedDraftStateSetters: {
+    setSelectedBaseline: vi.fn(),
+    setEditBaseVersion: vi.fn(),
+    setDraftTitle: vi.fn(),
+    setDraftContent,
+    setDraftTags: vi.fn(),
+    setDraftFavorite: vi.fn(),
+    setDraftAttachments: vi.fn(),
+    setLocalDraftInfo: vi.fn(),
+    setLocalDraftError: vi.fn(),
+    setBlockNoteKey: vi.fn(),
+  },
   note: {
     id: 'note-1',
     version: 3,
@@ -22,7 +56,8 @@ const { yjsSyncSpy, setDraftContentSpy, note } = vi.hoisted(() => ({
       attachments: {},
     },
   },
-}))
+  }
+})
 
 vi.mock('../state/store', () => {
   const state = {
@@ -144,7 +179,7 @@ vi.mock('./vault/attachments', () => ({
     confirmCleanupUnusedAttachments: null,
     setConfirmCleanupUnusedAttachments: vi.fn(),
     attachmentRefs: { current: {} },
-    resetAttachmentUi: vi.fn(),
+    resetAttachmentUi: resetAttachmentUiSpy,
     addAttachments: vi.fn(),
     actuallyRemoveAttachment: vi.fn(),
     removeAttachment: vi.fn(),
@@ -157,12 +192,15 @@ vi.mock('./vault/attachments', () => ({
 vi.mock('../hooks/useYjsSync', () => ({
   useYjsSync: vi.fn(() => ({
     doc: {},
+    documentNoteId: 'note-1',
+    documentGeneration: 1,
     sync: yjsSyncSpy,
     isSyncing: false,
     dirty: false,
     lastSyncStatus: { type: 'idle' },
     saveToLocal: vi.fn(),
     loadFromLocal: vi.fn(),
+    deleteLocal: vi.fn(),
   })),
 }))
 
@@ -187,19 +225,28 @@ vi.mock('./vault/search', () => ({
   })),
 }))
 
-vi.mock('./vault/lifecycle', () => ({
-  createNotePersistence: vi.fn(),
-  createVaultSyncApi: vi.fn(() => ({ getNote: vi.fn(), putNote: vi.fn() })),
-  deleteNotePersistence: vi.fn(),
+vi.mock('./vault/lifecycle.local', () => ({
   loadNotesFromIdb: vi.fn(async () => undefined),
-  migrateLegacyNotesInBackground: vi.fn(async () => undefined),
+}))
+
+vi.mock('./vault/lifecycle.remote', () => ({
+  createNotePersistence: vi.fn(),
+  deleteNotePersistence: vi.fn(),
   syncNotesFromRemote: vi.fn(async () => undefined),
+}))
+
+vi.mock('./vault/lifecycle.sync-api', () => ({
+  createVaultSyncApi: vi.fn(() => ({ getNote: vi.fn(), putNote: vi.fn() })),
+}))
+
+vi.mock('./vault/lifecycle.migration', () => ({
+  migrateLegacyNotesInBackground: vi.fn(async () => undefined),
 }))
 
 vi.mock('./vault/drafts', () => ({
   applySelectedBaselineState: vi.fn(),
   applySelectedDraftOverlay: vi.fn(),
-  loadSelectedDraftSnapshot: vi.fn(async () => null),
+  loadSelectedDraftSnapshot: loadSelectedDraftSnapshotSpy,
   resetSelectedDraftState: vi.fn(),
   seedSelectedDraftState: vi.fn(),
   useSelectedDraftController: vi.fn(() => ({
@@ -231,21 +278,10 @@ vi.mock('./vault/drafts', () => ({
       },
     },
     dirty: false,
-    stateSetters: {
-      setSelectedBaseline: vi.fn(),
-      setEditBaseVersion: vi.fn(),
-      setDraftTitle: vi.fn(),
-      setDraftContent: setDraftContentSpy,
-      setDraftTags: vi.fn(),
-      setDraftFavorite: vi.fn(),
-      setDraftAttachments: vi.fn(),
-      setLocalDraftInfo: vi.fn(),
-      setLocalDraftError: vi.fn(),
-      setBlockNoteKey: vi.fn(),
-    },
+    stateSetters: selectedDraftStateSetters,
   })),
   useLocalDraftPersistence: vi.fn(() => ({
-    cancelPendingSave: vi.fn(),
+    cancelPendingSave: cancelPendingLocalDraftSaveSpy,
   })),
 }))
 
@@ -269,6 +305,8 @@ describe('VaultView autosave regression', () => {
     vi.useFakeTimers()
     yjsSyncSpy.mockClear()
     setDraftContentSpy.mockClear()
+    loadSelectedDraftSnapshotSpy.mockReset()
+    loadSelectedDraftSnapshotSpy.mockResolvedValue(null)
   })
 
   afterEach(() => {
@@ -290,5 +328,24 @@ describe('VaultView autosave regression', () => {
 
     expect(setDraftContentSpy).not.toHaveBeenCalled()
     expect(yjsSyncSpy).not.toHaveBeenCalled()
+  })
+
+  test('does not mount an editable document before hydration finishes', async () => {
+    let resolveHydration!: (value: null) => void
+    loadSelectedDraftSnapshotSpy.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveHydration = resolve
+    }))
+
+    const view = render(<VaultView />)
+
+    expect(view.queryByTestId('blocknote')).toBeNull()
+
+    await act(async () => {
+      resolveHydration(null)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(view.getByTestId('blocknote')).toBeInTheDocument()
   })
 })

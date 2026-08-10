@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { deviceListResponseSchema, okResponseSchema } from '@inkrypt/contracts/auth'
 import { deleteJSON, getJSON, postJSON } from '../../lib/api'
 import { formatErrorZh } from '../../lib/errors'
 import type { DeviceItem } from './types'
@@ -85,7 +86,7 @@ export function useDeviceManagement({
     setDevicesBusy(true)
     setDevicesError(null)
     try {
-      const res = await getJSON<{ credentials: DeviceItem[] }>('/auth/device/list')
+      const res = await getJSON('/auth/device/list', deviceListResponseSchema)
       setDevices(res.credentials)
     } catch (err) {
       setDevicesError(formatErrorZh(err))
@@ -99,7 +100,11 @@ export function useDeviceManagement({
     const next = editingName.trim()
     setSaving(true)
     try {
-      await postJSON('/auth/device/rename', { credentialId: targetId, deviceName: next })
+      await postJSON(
+        '/auth/device/rename',
+        { credentialId: targetId, deviceName: next },
+        okResponseSchema,
+      )
       setDevices((prev) =>
         prev ? prev.map((device) => (device.id === targetId ? { ...device, deviceName: next || null } : device)) : prev,
       )
@@ -134,7 +139,7 @@ export function useDeviceManagement({
     setDeletingId(targetId)
     setDevicesError(null)
     try {
-      await deleteJSON(`/auth/device/${encodeURIComponent(targetId)}`)
+      await deleteJSON(`/auth/device/${encodeURIComponent(targetId)}`, okResponseSchema)
       setDevices((prev) => (prev ? prev.filter((device) => device.id !== targetId) : prev))
       if (isCurrent) {
         onClose()

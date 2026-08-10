@@ -140,6 +140,20 @@ describe('vault editor state helpers', () => {
       content: 'Body',
       attachments: {},
     })
+
+    expect(buildPayloadForStore({
+      ...payload,
+      format: 'blocknote+yjs-v1',
+      yjsSnapshotB64: 'snapshot',
+      syncNonce: 'nonce',
+    })).toEqual({
+      ...payload,
+      format: 'blocknote+yjs-v1',
+      yjsSnapshotB64: 'snapshot',
+      syncNonce: 'nonce',
+      content: 'Body',
+      attachments: {},
+    })
   })
 
   test('syncs markdown only when the editor content changes', () => {

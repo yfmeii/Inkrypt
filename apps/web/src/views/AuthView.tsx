@@ -52,6 +52,7 @@ export function AuthView() {
 
   const [mode, setMode] = useState<Mode>('unlock')
   const [deviceName, setDeviceName] = useState('')
+  const [setupToken, setSetupToken] = useState('')
   const [pairWords, setPairWords] = useState<string[]>(() => Array.from({ length: PAIRING_SECRET_WORD_COUNT }, () => ''))
   const [rememberUnlock, setRememberUnlock] = useState(() => {
     try {
@@ -79,6 +80,7 @@ export function AuthView() {
   } = useAuthFlowController({
     mode,
     deviceName,
+    setupToken,
     rememberUnlock,
     credentialStorageKey: LS_CREDENTIAL_ID,
     onSessionReady: setSession,
@@ -143,7 +145,7 @@ export function AuthView() {
 
   useEffect(() => {
     resetTransientState()
-    if (mode === 'unlock' || mode === 'setup') {
+    if (mode === 'unlock') {
       void prepare()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -343,6 +345,21 @@ export function AuthView() {
                 </div>
 
                 <div className="space-y-2">
+                  <Label htmlFor="setup-token">初始化口令</Label>
+                  <Input
+                    id="setup-token"
+                    type="password"
+                    autoComplete="off"
+                    value={setupToken}
+                    onChange={(event) => setSetupToken(event.target.value)}
+                    placeholder="输入部署时配置的 SETUP_TOKEN"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    该口令仅用于首次认领空保险库，初始化完成后不再参与日常解锁。
+                  </p>
+                </div>
+
+                <div className="space-y-2">
                   <Label htmlFor="setup-device-name">设备名称（可选）</Label>
                   <Input
                     id="setup-device-name"
@@ -371,8 +388,8 @@ export function AuthView() {
                     {busy && <Spinner className="mr-1" />}
                     完成
                   </Button>
-                  <Button variant="outline" onClick={prepare} disabled={busy} className="rounded-full">
-                    重新准备
+                  <Button variant="outline" onClick={prepare} disabled={busy || !setupToken.trim()} className="rounded-full">
+                    {prepared ? '重新准备' : '准备创建'}
                   </Button>
                 </div>
 

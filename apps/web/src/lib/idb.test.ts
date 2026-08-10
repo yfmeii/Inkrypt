@@ -16,6 +16,7 @@ import {
   idbGetDraftNote,
   idbSetDraftNote,
   idbDeleteDraftNote,
+  idbApplyNoteChanges,
   type EncryptedNoteRecord,
   type DraftNoteRecordV1,
 } from './idb'
@@ -87,6 +88,34 @@ describe('idb - encrypted notes', () => {
 
     const result = await idbGetEncryptedNote('note-1')
     expect(result?.version).toBe(2)
+  })
+
+  it('does not regress a higher note version during a delayed upsert', async () => {
+    await idbUpsertEncryptedNotes([createNote('note-1', { version: 3, encrypted_data: 'newer' })])
+    await idbUpsertEncryptedNotes([createNote('note-1', { version: 2, encrypted_data: 'older' })])
+
+    const result = await idbGetEncryptedNote('note-1')
+    expect(result?.version).toBe(3)
+    expect(result?.encrypted_data).toBe('newer')
+  })
+
+  it('keeps a higher tombstone while advancing the sync cursor', async () => {
+    await idbUpsertEncryptedNotes([createNote('note-1', {
+      version: 5,
+      is_deleted: 1,
+      encrypted_data: 'tombstone',
+    })])
+
+    await idbApplyNoteChanges([
+      createNote('note-1', { version: 4, is_deleted: 0, encrypted_data: 'stale-content' }),
+    ], 'cursor-5')
+
+    expect(await idbGetEncryptedNote('note-1')).toMatchObject({
+      version: 5,
+      is_deleted: 1,
+      encrypted_data: 'tombstone',
+    })
+    expect(await idbGetMeta('notes_sync_cursor_v1')).toBe('cursor-5')
   })
 
   it('upserts multiple notes', async () => {

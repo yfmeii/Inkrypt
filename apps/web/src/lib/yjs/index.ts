@@ -12,17 +12,26 @@
 
 // SyncController
 export { SyncController } from './syncController'
-export type { SyncStatus, SyncResult, NotePayloadWithYjs } from './syncController'
+export type { SavedNoteReceipt, SyncStatus, SyncResult, NotePayloadWithYjs } from './syncController'
 
 // DocManager
 export { YjsDocManager } from './docManager'
 export type { YjsDocState } from './docManager'
 
 // Serializer
-export { encodeYDoc, decodeYDoc, mergeYDocs, areYDocsEqual } from './serializer'
+export {
+  encodeYDoc,
+  decodeYDoc,
+  mergeYDocs,
+  areYDocsEqual,
+  hasYDocUpdatesBeyond,
+} from './serializer'
 
 // BlockNoteBinding
 export { YjsBlockNoteBinding, BLOCKNOTE_YJS_INIT_ORIGIN } from './blockNoteBinding'
+
+// Body initialization state
+export { isYjsBodyInitialized, markYjsBodyInitialized } from './bodyState'
 
 // LocalPersistence
 export { LocalPersistence } from './localPersistence'

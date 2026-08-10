@@ -1,5 +1,7 @@
 import * as Y from 'yjs'
 import { decodeYDoc } from './serializer'
+import { encodeYDoc } from './serializer'
+import { markYjsBodyInitialized } from './bodyState'
 
 export interface YjsDocState {
   doc: Y.Doc
@@ -19,7 +21,11 @@ export class YjsDocManager {
   /**
    * 初始化或加载笔记的 Y.Doc
    */
-  async initialize(noteId: string, yjsSnapshotB64?: string): Promise<Y.Doc> {
+  async initialize(
+    noteId: string,
+    yjsSnapshotB64?: string,
+    options?: { dirty?: boolean },
+  ): Promise<Y.Doc> {
     // 清理旧的监听器
     if (this.state?.doc && this.updateHandler) {
       this.state.doc.off('update', this.updateHandler)
@@ -28,12 +34,20 @@ export class YjsDocManager {
     const doc = yjsSnapshotB64 
       ? decodeYDoc(yjsSnapshotB64)
       : new Y.Doc()
+
+    // Any persisted snapshot represents an established document, including a
+    // deliberately empty one. Mark it before subscribing so an empty body is
+    // never mistaken for an uninitialized document and repopulated from stale
+    // projected content.
+    if (yjsSnapshotB64) markYjsBodyInitialized(doc)
+
+    const initializedSnapshot = yjsSnapshotB64 ? encodeYDoc(doc) : null
     
     this.state = {
       doc,
       noteId,
-      dirty: false,
-      lastSyncedSnapshot: yjsSnapshotB64 ?? null
+      dirty: options?.dirty === true,
+      lastSyncedSnapshot: initializedSnapshot,
     }
 
     // 监听文档变化
@@ -78,6 +92,12 @@ export class YjsDocManager {
       this.state.lastSyncedSnapshot = snapshot
       this.notifyChange()
     }
+  }
+
+  markSyncedIfUnchanged(snapshot: string): boolean {
+    if (!this.state || encodeYDoc(this.state.doc) !== snapshot) return false
+    this.markSynced(snapshot)
+    return true
   }
 
   /**

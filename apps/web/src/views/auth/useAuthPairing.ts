@@ -1,4 +1,9 @@
 import { useRef, useState } from 'react'
+import { deviceAddStartResponseSchema, okResponseSchema } from '@inkrypt/contracts/auth'
+import {
+  bobHandshakeStatusResponseSchema,
+  handshakeMutationResponseSchema,
+} from '@inkrypt/contracts/handshake'
 import { postJSON } from '../../lib/api'
 import { type Bytes, bytesToBase64Url, randomBytes, wrapMasterKey } from '../../lib/crypto'
 import { formatErrorZh } from '../../lib/errors'
@@ -10,14 +15,6 @@ import {
 import { normalizePairingSecret } from '../../lib/pairingSecret'
 import { startRegistrationWithPrf } from '../../lib/webauthn'
 import { ensureSharedSecretAndSas, pollHandshake, useHandshakeRunState } from '../handshakeSession'
-
-type HandshakeStatus = {
-  status: 'waiting_join' | 'waiting_confirm' | 'finished'
-  expiresAt: number
-  alicePublicKey: any
-  encryptedPayload: string | null
-  iv: string | null
-}
 
 type SessionPayload = {
   masterKey: Bytes
@@ -66,6 +63,7 @@ export function useAuthPairing({
   const [pairingSas, setPairingSas] = useState<string | null>(null)
   const [pairingExpiresAt, setPairingExpiresAt] = useState<number | null>(null)
   const [pairingMasterKey, setPairingMasterKey] = useState<Bytes | null>(null)
+  const [pairingCeremonyId, setPairingCeremonyId] = useState<string | null>(null)
 
   const pairingSecretRef = useRef<string | null>(null)
   const { beginRun, setKeyPair, cancelRun, isCurrentRun } = useHandshakeRunState()
@@ -77,6 +75,7 @@ export function useAuthPairing({
     setPairingSas(null)
     setPairingExpiresAt(null)
     setPairingMasterKey(null)
+    setPairingCeremonyId(null)
     pairingSecretRef.current = null
     cancelRun()
   }
@@ -88,6 +87,7 @@ export function useAuthPairing({
     setPairingSas(null)
     setPairingExpiresAt(null)
     setPairingMasterKey(null)
+    setPairingCeremonyId(null)
 
     const runId = beginRun()
 
@@ -99,10 +99,10 @@ export function useAuthPairing({
       pairingSecretRef.current = secret
       const publicKey = await exportPublicKeyJwk(keyPair.publicKey)
 
-      const joined = await postJSON<{ ok: true; expiresAt: number }>('/api/handshake/join', {
+      const joined = await postJSON('/api/handshake/join', {
         sessionSecret: secret,
         publicKey,
-      })
+      }, handshakeMutationResponseSchema)
       setPairingExpiresAt(joined.expiresAt)
 
       let sharedSecret: ArrayBuffer | null = null
@@ -110,9 +110,11 @@ export function useAuthPairing({
         runId,
         isCurrentRun,
         poll: () =>
-          postJSON<HandshakeStatus>('/api/handshake/status/bob', {
-            sessionSecret: secret,
-          }),
+          postJSON(
+            '/api/handshake/status/bob',
+            { sessionSecret: secret },
+            bobHandshakeStatusResponseSchema,
+          ),
         onStatus: async (status) => {
           setPairingExpiresAt(status.expiresAt)
 
@@ -135,8 +137,12 @@ export function useAuthPairing({
           if (masterKey.byteLength !== 32) throw new Error('收到的主密钥长度异常')
           setPairingMasterKey(masterKey)
 
-          const resp = await postJSON<{ options: any }>('/auth/device/add/start', { sessionSecret: secret })
+          const resp = await postJSON('/auth/device/add/start', {
+            grantSecret: secret,
+            clientRequestId: crypto.randomUUID(),
+          }, deviceAddStartResponseSchema)
           setPairingPrepared(resp.options)
+          setPairingCeremonyId(resp.ceremonyId)
           return true
         },
       })
@@ -159,24 +165,23 @@ export function useAuthPairing({
     try {
       const prepared = pairingPrepared
       const masterKey = pairingMasterKey
-      if (!prepared || !masterKey) {
+      if (!prepared || !masterKey || !pairingCeremonyId) {
         throw new Error('配对状态已失效，请重新开始配对。')
       }
 
-      const secret = pairingSecretRef.current ?? normalizePairingSecret(pairWords.join(' '))
       const normalizedDeviceName = normalizePairingDeviceName(deviceName)
       const prfSalt = randomBytes(32)
       const { attestation, prfOutput } = await startRegistrationWithPrf(prepared, prfSalt)
       const { wrappedKey, iv } = await wrapMasterKey(masterKey, prfOutput)
 
       await postJSON('/auth/device/add', {
-        sessionSecret: secret,
+        ceremonyId: pairingCeremonyId,
         attestation,
         prfSalt: bytesToBase64Url(prfSalt),
         wrappedKey,
         iv,
         deviceName: normalizedDeviceName ?? undefined,
-      })
+      }, okResponseSchema)
 
       localStorage.setItem(credentialStorageKey, attestation.id)
       onSessionReady({

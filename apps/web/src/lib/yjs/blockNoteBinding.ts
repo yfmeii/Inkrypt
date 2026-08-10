@@ -3,6 +3,8 @@ import type { BlockNoteEditor, Block, PartialBlock } from '@blocknote/core'
 import { blocksToYXmlFragment, yXmlFragmentToBlocks } from '@blocknote/core/yjs'
 
 export const BLOCKNOTE_YJS_INIT_ORIGIN = 'blocknote:init'
+export const BLOCKNOTE_YJS_BODY_STATE_MAP_NAME = 'inkrypt-body-state'
+export const BLOCKNOTE_YJS_BODY_INITIALIZED_KEY = 'initialized'
 
 /**
  * BlockNote 与 Y.Doc 的绑定层
@@ -52,6 +54,12 @@ export class YjsBlockNoteBinding {
 
     // 应用临时文档的更新到目标文档
     Y.applyUpdate(this.doc, update, BLOCKNOTE_YJS_INIT_ORIGIN)
+
+    this.doc.transact(() => {
+      this.doc
+        .getMap(BLOCKNOTE_YJS_BODY_STATE_MAP_NAME)
+        .set(BLOCKNOTE_YJS_BODY_INITIALIZED_KEY, true)
+    }, BLOCKNOTE_YJS_INIT_ORIGIN)
   }
 
   /**

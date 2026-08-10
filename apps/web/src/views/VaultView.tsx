@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { motion, AnimatePresence } from 'motion/react'
 import { postJSON } from '../lib/api'
@@ -6,14 +6,13 @@ import { bytesToBase64, bytesToHex, encryptNotePayload, noteAad, type NotePayloa
 import { formatErrorZh } from '../lib/errors'
 import { useFocusTrap } from '../lib/focusTrap'
 import { useBodyScrollLock } from '../lib/scrollLock'
-import { estimateDataUrlBytes, fileToDataUrl } from '../lib/attachments'
 import {
   idbDeleteDraftNote,
   idbUpsertEncryptedNotes,
 } from '../lib/idb'
-import { useInkryptStore, type DecryptedNote } from '../state/store'
+import { useInkryptStore } from '../state/store'
 import { useMediaQuery } from '../hooks/useMediaQuery'
-import { BlockNoteComponent, type BlockNoteComponentRef } from '../components/BlockNote'
+import { BlockNoteComponent } from '../components/BlockNote'
 import { DrawingEditor } from '../components/DrawingEditor'
 import { AttachmentsPanel } from '../components/AttachmentsPanel'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -21,9 +20,9 @@ import { Toast, ToastStack } from '../components/Toast'
 import { SettingsPanel } from '../components/SettingsPanel'
 import { SearchDialog } from '../components/SearchDialog'
 import { useYjsSync } from '../hooks/useYjsSync'
-import { detectNoteFormat, migrateToYjs, encodeYDoc, mergeYDocs } from '../lib/yjs'
+import { detectNoteFormat, migrateToYjs, mergeYDocs } from '../lib/yjs'
 import type { NotePayloadWithYjs, YjsNotePayload } from '../lib/yjs'
-import { countAttachmentRefs, useVaultAttachments } from './vault/attachments'
+import { useVaultAttachments } from './vault/attachments'
 import {
   type LocalDraftInfo,
   applySelectedBaselineState,
@@ -50,25 +49,18 @@ import {
 } from './vault/lifecycle.remote'
 import { createVaultSyncApi } from './vault/lifecycle.sync-api'
 import { migrateLegacyNotesInBackground as migrateLegacyNotesInBackgroundState } from './vault/lifecycle.migration'
-import { type SyncSavedRecord } from './vault/lifecycle.shared'
-import { buildSyncButtonState, prepareSelectedSave, SYNC_BUSY_TEXT } from './vault/editor-state'
+import { useVaultEditorBridge } from './vault/editor-bridge'
+import { useVaultDrawingController } from './vault/drawings'
+import { useVaultSaveTriggers } from './vault/save-triggers'
+import { buildPayloadForStore, buildSyncButtonState, prepareSelectedSave, SYNC_BUSY_TEXT } from './vault/editor-state'
 import { buildSearchDialogResults, createSearchQueryState, SEARCH_PAGE_SIZE, useVaultSearchIndex, useVaultSearchResults } from './vault/search'
-import {
-  createDrawingId,
-  type DrawingInitialData,
-  getAttachmentNameFromUrl,
-  getDrawingAttachmentNames,
-  getDrawingIdFromAttachment,
-  MAX_DRAWING_PREVIEW_BYTES,
-  MAX_DRAWING_SCENE_BYTES,
-  parseDrawingSceneData,
-  sceneJsonToDataUrl,
-} from '../lib/drawing'
 import { SidebarInset, SidebarProvider } from '../components/ui/sidebar'
 import { Button } from '../components/ui/button'
 import { Plus, Search, Settings, RefreshCw, Lock, Edit3 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import type { QuickActionsController } from '../components/settings/QuickActionsSection'
+import { CanonicalNoteSession } from '../application/notes/canonicalNoteSession'
+import type { SaveResult } from '../application/notes/saveResult'
 
 export function VaultView() {
   const masterKey = useInkryptStore((s) => s.masterKey)
@@ -92,6 +84,7 @@ export function VaultView() {
   const deferredSearch = useDeferredValue(search)
   const [searchLimit, setSearchLimit] = useState(SEARCH_PAGE_SIZE)
   const [notesLoaded, setNotesLoaded] = useState(false)
+  const [selectedWorkspaceReady, setSelectedWorkspaceReady] = useState(false)
   const [busy, setBusy] = useState(false)
   const [busyText, setBusyText] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -102,13 +95,6 @@ export function VaultView() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [confirmDeleteNote, setConfirmDeleteNote] = useState(false)
   const [confirmLock, setConfirmLock] = useState(false)
-  const [confirmDeleteDrawing, setConfirmDeleteDrawing] = useState<{ blockId: string; drawingId: string; title: string } | null>(null)
-  const [drawingEditorOpen, setDrawingEditorOpen] = useState(false)
-  const [drawingEditorSaving, setDrawingEditorSaving] = useState(false)
-  const [activeDrawingId, setActiveDrawingId] = useState<string | null>(null)
-  const [activeDrawingBlockId, setActiveDrawingBlockId] = useState<string | null>(null)
-  const [drawingTitle, setDrawingTitle] = useState('')
-  const [drawingInitialData, setDrawingInitialData] = useState<DrawingInitialData | null>(null)
   // Default true if not set
   const [showInfo, setShowInfo] = useState(() => !localStorage.getItem('inkrypt_hide_info'))
 
@@ -181,9 +167,45 @@ export function VaultView() {
     setError,
   })
 
-  const blockNoteRef = useRef<BlockNoteComponentRef | null>(null)
-  const yjsContentSyncTimerRef = useRef<number | null>(null)
-  const pendingDrawingInsertRef = useRef<((value: { drawingId: string; previewFilename: string; sceneFilename: string; title: string } | null) => void) | null>(null)
+  const {
+    blockNoteRef,
+    handleBlockNoteChange,
+    handleYjsDocChange,
+    syncDraftContentFromEditor,
+  } = useVaultEditorBridge({
+    draftContentRef,
+    setDraftContent,
+  })
+  const {
+    editorOpen: drawingEditorOpen,
+    editorSaving: drawingEditorSaving,
+    activeDrawingId,
+    drawingTitle,
+    drawingInitialData,
+    pendingDelete: confirmDeleteDrawing,
+    setDrawingTitle,
+    handleEditorOpenChange: handleDrawingEditorOpenChange,
+    resetDrawingState,
+    requestInsertDrawing: handleInsertDrawingFromSlashMenu,
+    openDrawingAttachment: openExistingDrawing,
+    openDrawingUrl: openExistingDrawingByUrl,
+    saveDrawing: handleSaveDrawing,
+    downloadDrawingPreview: handleDownloadDrawingPreview,
+    renameDrawing: handleRenameDrawing,
+    requestDeleteDrawing,
+    cancelDeleteDrawing,
+    confirmDeleteDrawing: confirmDrawingDeletion,
+  } = useVaultDrawingController({
+    canOpenDrawing: Boolean(selected && !busy && !attachmentsBusy && selectedBaseline),
+    draftAttachments,
+    setDraftAttachments,
+    blockNoteRef,
+    draftContentRef,
+    setError,
+    closeAttachments: () => setShowAttachments(false),
+    downloadAttachment,
+    syncDraftContentFromEditor,
+  })
   const recoveryCodeModalRef = useRef<HTMLDivElement>(null)
   const helpModalRef = useRef<HTMLDivElement>(null)
 
@@ -253,19 +275,20 @@ export function VaultView() {
     return (selected.payload as YjsNotePayload).yjsSnapshotB64 ?? null
   }, [selected, selectedFormat])
 
-  const syncRemoteVersionRef = useRef<number>(0)
-  const syncSavedRef = useRef<SyncSavedRecord | null>(null)
-  const selectedRef = useRef<DecryptedNote | null>(null)
-  selectedRef.current = selected
+  const canonicalNoteSessionRef = useRef(new CanonicalNoteSession())
+  useLayoutEffect(() => {
+    canonicalNoteSessionRef.current.activate(selected)
+  }, [selected])
 
   const syncApi = useMemo(
-    () => createVaultSyncApi({ masterKey, draftStateRef, selectedRef, syncRemoteVersionRef, syncSavedRef }),
+    () => createVaultSyncApi({ masterKey, session: canonicalNoteSessionRef.current }),
     [masterKey],
   )
 
   // Yjs sync hook - 仅在选中笔记且有 masterKey 时启用
   const yjsSync = useYjsSync({
     noteId: masterKey && selectedNoteId ? selectedNoteId : '',
+    masterKey,
     initialSnapshot: selectedSnapshot,
     api: syncApi,
     onSyncError: (error) => {
@@ -274,9 +297,15 @@ export function VaultView() {
   })
 
   useEffect(() => {
-    syncRemoteVersionRef.current = 0
-    syncSavedRef.current = null
-  }, [selectedNoteId])
+    if (!selectedNoteId) return
+    canonicalNoteSessionRef.current.updateDraft(selectedNoteId, draftStateRef.current)
+  }, [draftAttachments, draftContent, draftFavorite, draftStateRef, draftTags, draftTitle, selectedNoteId])
+
+  useEffect(() => {
+    if (!selectedNoteId) return
+    if (yjsSync.documentNoteId !== selectedNoteId || !yjsSync.doc) return
+    canonicalNoteSessionRef.current.attachDocument(selectedNoteId, yjsSync.doc)
+  }, [selectedNoteId, yjsSync.doc, yjsSync.documentNoteId])
 
   const selectedNoteIdRef = useRef<string | null>(null)
   const dirtyRef = useRef(false)
@@ -317,9 +346,6 @@ export function VaultView() {
     searchIndex,
   })
 
-  // 自动保存到云端的函数（使用 ref 避免依赖问题）
-  const saveSelectedRef = useRef<((options?: { silent?: boolean }) => Promise<void>) | null>(null)
-
   const {
     cancelPendingSave: cancelPendingLocalDraftSave,
   } = useLocalDraftPersistence({
@@ -339,8 +365,24 @@ export function VaultView() {
     setLocalDraftError,
   })
 
+  const hasUnsavedChanges = dirty || yjsSync.dirty
+  const { saveSelected } = useVaultSaveTriggers({
+    performSaveSelected,
+    hasMasterKey: Boolean(masterKey),
+    hasSelection: Boolean(selected),
+    selectedBaselineReady: selectedWorkspaceReady && Boolean(selectedBaseline),
+    dirty: hasUnsavedChanges,
+    attachmentsBusy,
+    busy,
+    draftTitle,
+    draftContent,
+    draftTags,
+    draftFavorite,
+    draftAttachments,
+  })
+
   // 同步按钮状态 - 使用 Yjs sync 状态
-  const yjsDirty = yjsSync.dirty || dirty
+  const yjsDirty = hasUnsavedChanges
   const syncStatus = yjsSync.lastSyncStatus
   const syncButtonState = buildSyncButtonState({
     isSyncing: yjsSync.isSyncing,
@@ -354,7 +396,13 @@ export function VaultView() {
     localDraftError,
   })
   const isSyncing = syncButtonState.isSyncing
-  const editorInputsDisabled = attachmentsBusy || !selectedBaseline || (busy && !isSyncing)
+  const selectedEditorReady = Boolean(
+    selectedWorkspaceReady &&
+    selectedBaseline &&
+    yjsSync.doc &&
+    yjsSync.documentNoteId === selectedNoteId,
+  )
+  const editorInputsDisabled = attachmentsBusy || !selectedEditorReady || (busy && !isSyncing)
   const editorContentDisabled = editorInputsDisabled
 
   const syncButton = (
@@ -385,25 +433,17 @@ export function VaultView() {
   useEffect(() => {
     const noteId = selectedNoteId
     const runId = ++selectedLoadRunIdRef.current
-    const selectedSnapshot = selectedRef.current
+    const selectedSnapshot = canonicalNoteSessionRef.current.getActiveNote()
 
+    setSelectedWorkspaceReady(false)
     cancelPendingLocalDraftSave()
     setLocalDraftSaving(false)
     resetAttachmentUi()
-    setDrawingEditorOpen(false)
-    setDrawingEditorSaving(false)
-    setConfirmDeleteDrawing(null)
-    setActiveDrawingId(null)
-    setActiveDrawingBlockId(null)
-    setDrawingTitle('')
-    setDrawingInitialData(null)
-    if (pendingDrawingInsertRef.current) {
-      pendingDrawingInsertRef.current(null)
-      pendingDrawingInsertRef.current = null
-    }
+    resetDrawingState()
 
     if (!noteId) {
       resetSelectedDraftState(selectedDraftStateSetters)
+      setSelectedWorkspaceReady(true)
       return
     }
 
@@ -415,7 +455,7 @@ export function VaultView() {
       try {
         const snapshot = await loadSelectedDraftSnapshot({ masterKey, noteId })
         if (!snapshot) {
-          const currentSelected = selectedRef.current
+          const currentSelected = canonicalNoteSessionRef.current.getActiveNote()
           if (!currentSelected || currentSelected.id !== noteId) return
           flushSync(() => {
             applySelectedBaselineState({
@@ -452,7 +492,7 @@ export function VaultView() {
         })
       } catch (err) {
         if (selectedLoadRunIdRef.current !== runId) return
-        const currentSelected = selectedRef.current
+        const currentSelected = canonicalNoteSessionRef.current.getActiveNote()
         if (currentSelected && currentSelected.id === noteId) {
           flushSync(() => {
             applySelectedBaselineState({
@@ -463,9 +503,13 @@ export function VaultView() {
           })
         }
         setError(formatErrorZh(err))
+      } finally {
+        if (selectedLoadRunIdRef.current === runId) {
+          setSelectedWorkspaceReady(true)
+        }
       }
     })()
-  }, [cancelPendingLocalDraftSave, masterKey, resetAttachmentUi, selectedDraftStateSetters, selectedNoteId])
+  }, [cancelPendingLocalDraftSave, masterKey, resetAttachmentUi, resetDrawingState, selectedDraftStateSetters, selectedNoteId])
 
   useEffect(() => {
     void (async () => {
@@ -564,8 +608,10 @@ export function VaultView() {
     }
   }
 
-  async function saveSelected(options?: { silent?: boolean }) {
-    if (!masterKey || !selected) return
+  async function performSaveSelected(options?: { silent?: boolean }): Promise<SaveResult> {
+    if (!masterKey) return { status: 'skipped', reason: 'locked' }
+    if (!selected) return { status: 'skipped', reason: 'no-selection' }
+    const savingNoteId = selected.id
     setError(null)
     cancelPendingLocalDraftSave()
     const silent = options?.silent === true
@@ -574,12 +620,7 @@ export function VaultView() {
       setBusy(true)
     }
     try {
-      const requireSyncSaved = (): SyncSavedRecord => {
-        const saved = syncSavedRef.current
-        if (!saved) throw new Error('同步完成，但未收到服务器确认')
-        return saved
-      }
-      const { content, payload, payloadForStore } = prepareSelectedSave({
+      const { content, payload } = prepareSelectedSave({
         markdown: blockNoteRef.current?.getMarkdown(),
         currentContent: draftContentRef.current,
         updateDraftContent: (nextContent) => {
@@ -592,7 +633,6 @@ export function VaultView() {
         draftFavorite,
         draftAttachments,
       })
-      syncSavedRef.current = null
       draftStateRef.current = {
         title: payload.meta.title,
         tags: payload.meta.tags,
@@ -601,7 +641,9 @@ export function VaultView() {
         content,
         createdAt: payload.meta.created_at,
       }
+      canonicalNoteSessionRef.current.updateDraft(selected.id, draftStateRef.current)
       if (!yjsSync.doc) throw new Error('文档尚未初始化，请稍后再试')
+      canonicalNoteSessionRef.current.attachDocument(selected.id, yjsSync.doc)
 
       if (selectedFormat === 'legacy' && yjsSync.doc) {
         const editor = blockNoteRef.current?.getEditor()
@@ -615,35 +657,59 @@ export function VaultView() {
       const result = await yjsSync.sync()
       if (!result.success) throw new Error(result.error ?? '同步失败，请稍后重试')
 
-      const saved = requireSyncSaved()
-
-      const yjsSnapshotB64 = yjsSync.doc ? encodeYDoc(yjsSync.doc) : undefined
-      const payloadWithYjs = yjsSnapshotB64
-        ? ({ ...payload, format: 'blocknote+yjs-v1', yjsSnapshotB64 } as NotePayload)
-        : payload
-      const enc = await encryptNotePayload(masterKey, payloadWithYjs, noteAad(selected.id))
+      const saved = result.receipt
+      const savedPayload: NotePayload = {
+        ...saved.savedPayload,
+        attachments: saved.savedPayload.attachments ?? {},
+      }
+      const enc = await encryptNotePayload(masterKey, savedPayload, noteAad(selected.id))
 
       await idbUpsertEncryptedNotes([
         {
           id: selected.id,
           version: saved.version,
-          updated_at: saved.updated_at,
+          change_seq: saved.changeSequence,
+          updated_at: saved.updatedAt,
           is_deleted: 0,
           encrypted_data: enc.encrypted_data,
           data_iv: enc.iv,
         },
       ])
 
-      rememberNoteSearchText(selected.id, payload)
-      upsertNote({ ...selected, version: saved.version, updated_at: saved.updated_at, payload: payloadForStore })
-      setSelectedBaseline(payload)
+      rememberNoteSearchText(selected.id, savedPayload)
+      upsertNote({
+        ...selected,
+        version: saved.version,
+        updated_at: saved.updatedAt,
+        payload: buildPayloadForStore(savedPayload),
+      })
+      if (selectedNoteIdRef.current !== savingNoteId) {
+        return { status: 'saved', receipt: saved, mergedRemote: result.mergedRemote }
+      }
+      setSelectedBaseline(savedPayload)
       setEditBaseVersion(saved.version)
-      setLocalDraftInfo(null)
-      setLocalDraftError(null)
-      setLocalDraftSaving(false)
-      await idbDeleteDraftNote(selected.id)
+
+      const currentDraft = draftStateRef.current
+      const savedDraftStillCurrent =
+        result.snapshotAcknowledged &&
+        currentDraft.title === savedPayload.meta.title &&
+        currentDraft.content === savedPayload.content &&
+        currentDraft.is_favorite === savedPayload.meta.is_favorite &&
+        JSON.stringify(currentDraft.tags) === JSON.stringify(savedPayload.meta.tags) &&
+        JSON.stringify(currentDraft.attachments) === JSON.stringify(savedPayload.attachments)
+
+      if (savedDraftStillCurrent) {
+        cancelPendingLocalDraftSave()
+        setLocalDraftInfo(null)
+        setLocalDraftError(null)
+        setLocalDraftSaving(false)
+        await idbDeleteDraftNote(selected.id)
+      }
+      return { status: 'saved', receipt: saved, mergedRemote: result.mergedRemote }
     } catch (err) {
-      setError(formatErrorZh(err))
+      const error = formatErrorZh(err)
+      setError(error)
+      return { status: 'failed', error, canRetry: true }
     } finally {
       if (!silent) {
         setBusy(false)
@@ -652,52 +718,17 @@ export function VaultView() {
     }
   }
 
-  // 更新 saveSelectedRef 以便自动保存使用
-  useEffect(() => {
-    saveSelectedRef.current = saveSelected
-  })
-
-  useEffect(() => {
-    if (!selected || !masterKey || !selectedBaseline || !dirty) return
-    if (attachmentsBusy) return
-
-    const timer = window.setTimeout(() => {
-      if (saveSelectedRef.current) {
-        void saveSelectedRef.current({ silent: true })
-      }
-    }, 1000)
-
-    return () => window.clearTimeout(timer)
-  }, [attachmentsBusy, dirty, draftAttachments, draftContent, draftFavorite, draftTags, draftTitle, masterKey, selected, selectedBaseline])
-
-  // Ctrl/Cmd+S to save current note to cloud
-  // 使用捕获阶段，确保在 BlockNote 编辑器之前处理快捷键
-  useEffect(() => {
-    const handleSaveShortcut = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault()
-        e.stopPropagation()
-        // 只要有选中的笔记且不在忙碌状态，就允许保存
-        if (selected && !busy) {
-          // 使用 ref 获取最新的 saveSelected 函数
-          if (saveSelectedRef.current) {
-            void saveSelectedRef.current()
-          }
-        }
-      }
-    }
-    // 使用 capture: true 确保在编辑器之前捕获事件
-    window.addEventListener('keydown', handleSaveShortcut, true)
-    return () => window.removeEventListener('keydown', handleSaveShortcut, true)
-  }, [selected, busy])
-
   async function softDeleteSelected() {
     if (!masterKey || !selected) return
     setError(null)
     setBusyText('正在删除…')
     setBusy(true)
     try {
+      const deletingNoteId = selected.id
+      cancelPendingLocalDraftSave()
       await deleteNotePersistence({ masterKey, selected, forgetNoteSearchText, removeNote })
+      await yjsSync.deleteLocal()
+      await idbDeleteDraftNote(deletingNoteId)
     } catch (err) {
       setError(formatErrorZh(err))
     } finally {
@@ -705,211 +736,6 @@ export function VaultView() {
       setBusyText(null)
     }
   }
-
-  /**
-   * Handle BlockNote content changes
-   * Content is already markdown string
-   */
-  function handleBlockNoteChange(markdown: string): void {
-    draftContentRef.current = markdown
-    setDraftContent(markdown)
-  }
-
-  function handleYjsDocChange(event: { suppressDraftUpdate: boolean }): void {
-    if (event.suppressDraftUpdate) return
-    if (yjsContentSyncTimerRef.current) {
-      window.clearTimeout(yjsContentSyncTimerRef.current)
-    }
-    yjsContentSyncTimerRef.current = window.setTimeout(() => {
-      const markdown = blockNoteRef.current?.getMarkdown()
-      if (typeof markdown === 'string' && markdown !== draftContentRef.current) {
-        draftContentRef.current = markdown
-        setDraftContent(markdown)
-      }
-    }, 200)
-  }
-
-  function syncDraftContentFromEditor(): void {
-    const markdown = blockNoteRef.current?.getMarkdown()
-    if (typeof markdown === 'string') {
-      draftContentRef.current = markdown
-      setDraftContent(markdown)
-    }
-  }
-
-  function openNewDrawing(drawingId?: string): string | null {
-    if (!selected || busy || attachmentsBusy || !selectedBaseline) return null
-    setError(null)
-    const nextId = drawingId ?? createDrawingId()
-    setActiveDrawingId(nextId)
-    setActiveDrawingBlockId(null)
-    setDrawingTitle('')
-    setDrawingInitialData(null)
-    setDrawingEditorOpen(true)
-    return nextId
-  }
-
-  async function openExistingDrawing(sceneAttachmentName: string, options?: { blockId?: string; title?: string }): Promise<void> {
-    const drawingId = getDrawingIdFromAttachment(sceneAttachmentName)
-    const sceneDataUrl = draftAttachments[sceneAttachmentName]
-    if (!drawingId || !sceneDataUrl) {
-      setError('未找到对应的绘图源文件')
-      return
-    }
-
-    try {
-      setError(null)
-      const sceneData = await parseDrawingSceneData(sceneDataUrl)
-      setActiveDrawingId(drawingId)
-      setActiveDrawingBlockId(options?.blockId ?? null)
-      setDrawingTitle(options?.title === '未命名绘图' ? '' : (options?.title ?? ''))
-      setDrawingInitialData(sceneData)
-      setDrawingEditorOpen(true)
-      setShowAttachments(false)
-    } catch (err) {
-      setError(formatErrorZh(err))
-    }
-  }
-
-  async function openExistingDrawingByUrl(sceneUrl: string, options?: { drawingId?: string; blockId?: string; title?: string }): Promise<void> {
-    const sceneAttachmentName = getAttachmentNameFromUrl(sceneUrl)
-    if (!sceneAttachmentName) {
-      setError('未找到对应的绘图源文件')
-      return
-    }
-
-    if (options?.drawingId && !draftAttachments[sceneAttachmentName]) {
-      const { scene } = getDrawingAttachmentNames(options.drawingId)
-      if (draftAttachments[scene]) {
-        await openExistingDrawing(scene, options)
-        return
-      }
-    }
-
-    await openExistingDrawing(sceneAttachmentName, options)
-  }
-
-  async function handleInsertDrawingFromSlashMenu(): Promise<{ drawingId: string; previewFilename: string; sceneFilename: string; title: string } | null> {
-    const drawingId = openNewDrawing()
-    if (!drawingId) return null
-    return await new Promise((resolve) => {
-      pendingDrawingInsertRef.current = resolve
-    })
-  }
-
-  async function handleSaveDrawing(payload: { drawingId: string; title: string; sceneJson: string; previewBlob: Blob }): Promise<void> {
-    const { drawingId, title, sceneJson, previewBlob } = payload
-    const sceneBytes = new TextEncoder().encode(sceneJson).length
-    if (sceneBytes > MAX_DRAWING_SCENE_BYTES) {
-      throw new Error('绘图源文件超过 3MB。Excalidraw 内嵌图片会显著增大体积，请压缩图片或减少嵌入图片后重试')
-    }
-
-    const previewDataUrl = await fileToDataUrl(previewBlob)
-    const previewBytes = estimateDataUrlBytes(previewDataUrl)
-    if ((previewBytes ?? Number.MAX_SAFE_INTEGER) > MAX_DRAWING_PREVIEW_BYTES) {
-      throw new Error('绘图预览图超过 1.5MB，请缩小画布或减少复杂内容后重试')
-    }
-
-    const { scene, preview } = getDrawingAttachmentNames(drawingId)
-    const sceneDataUrl = sceneJsonToDataUrl(sceneJson)
-
-    setDrawingEditorSaving(true)
-    setError(null)
-    try {
-      setDraftAttachments((prev) => ({
-        ...prev,
-        [scene]: sceneDataUrl,
-        [preview]: previewDataUrl,
-      }))
-
-      if (pendingDrawingInsertRef.current) {
-        const resolvePendingInsert = pendingDrawingInsertRef.current
-        pendingDrawingInsertRef.current = null
-        resolvePendingInsert({
-          drawingId,
-          previewFilename: preview,
-          sceneFilename: scene,
-          title,
-        })
-      } else {
-        const currentContent = blockNoteRef.current?.getMarkdown() ?? draftContentRef.current
-        if (countAttachmentRefs(currentContent, preview) === 0) {
-          blockNoteRef.current?.insertDrawingCard({
-            drawingId,
-            previewFilename: preview,
-            sceneFilename: scene,
-            title,
-          })
-          window.setTimeout(() => syncDraftContentFromEditor(), 0)
-        } else if (activeDrawingBlockId) {
-          const editor = blockNoteRef.current?.getEditor() as any
-          if (editor?.updateBlock) {
-            editor.updateBlock(activeDrawingBlockId, {
-              type: 'drawingCard',
-              props: {
-                title: title || '未命名绘图',
-              },
-            })
-            window.setTimeout(() => syncDraftContentFromEditor(), 0)
-          }
-        }
-      }
-
-      setDrawingEditorOpen(false)
-      setActiveDrawingBlockId(null)
-      setDrawingTitle('')
-      setDrawingInitialData(null)
-    } finally {
-      setDrawingEditorSaving(false)
-    }
-  }
-
-  function handleDownloadDrawingPreview(previewAttachmentUrl: string): void {
-    const attachmentName = getAttachmentNameFromUrl(previewAttachmentUrl)
-    if (!attachmentName) return
-    downloadAttachment(attachmentName)
-  }
-
-  function handleDeleteDrawing(blockId: string, drawingId: string): void {
-    const editor = blockNoteRef.current?.getEditor() as any
-    const { scene, preview } = getDrawingAttachmentNames(drawingId)
-
-    if (editor?.removeBlocks) {
-      editor.removeBlocks([blockId])
-    }
-
-    setDraftAttachments((prev) => {
-      const next = { ...prev }
-      delete next[scene]
-      delete next[preview]
-      return next
-    })
-
-    window.setTimeout(() => syncDraftContentFromEditor(), 0)
-  }
-
-  function handleRenameDrawing(blockId: string, title: string): void {
-    const editor = blockNoteRef.current?.getEditor() as any
-    if (!editor?.updateBlock) return
-    editor.updateBlock(blockId, {
-      type: 'drawingCard',
-      props: { title },
-    })
-    window.setTimeout(() => syncDraftContentFromEditor(), 0)
-  }
-
-  useEffect(() => {
-    return () => {
-      if (yjsContentSyncTimerRef.current) {
-        window.clearTimeout(yjsContentSyncTimerRef.current)
-        yjsContentSyncTimerRef.current = null
-      }
-      if (pendingDrawingInsertRef.current) {
-        pendingDrawingInsertRef.current(null)
-        pendingDrawingInsertRef.current = null
-      }
-    }
-  }, [])
 
   const recoveryCodeBase64 = masterKey ? bytesToBase64(masterKey) : ''
   const recoveryCodeHex = masterKey ? bytesToHex(masterKey) : ''
@@ -1175,7 +1001,7 @@ export function VaultView() {
                   setDraftFavorite={setDraftFavorite}
                   busy={busy}
                   attachmentsBusy={attachmentsBusy}
-                  selectedBaselineReady={Boolean(selectedBaseline)}
+                  selectedBaselineReady={selectedEditorReady}
                   dirty={dirty}
                   busyText={busyText}
                   onSave={() => {
@@ -1185,7 +1011,7 @@ export function VaultView() {
                   onOpenAttachments={() => setShowAttachments(true)}
                 />
 
-                {!selectedBaseline ? <div className="editorHint muted small">正在解密笔记…</div> : null}
+                {!selectedEditorReady ? <div className="editorHint muted small">正在准备笔记编辑会话…</div> : null}
 
                 <input
                   className="tagsInput"
@@ -1197,29 +1023,31 @@ export function VaultView() {
                 />
 
                 <div className="contentInput blocknote-wrapper" data-editor-location="normal">
-                  <BlockNoteComponent
-                    key={`editor-${selectedNoteId}-${blockNoteKey}`}
-                    ref={blockNoteRef}
-                    initialContent={draftContent}
-                    attachments={draftAttachments}
-                    onChange={handleBlockNoteChange}
-                    disabled={editorContentDisabled}
-                    placeholder="请输入内容..."
-                    onAddAttachment={handleBlockNoteAddAttachment}
-                    onDropFiles={handleBlockNoteFiles}
-                    onPasteFiles={handleBlockNoteFiles}
-                    yjsDoc={yjsSync.doc ?? undefined}
-                    onYjsDocChange={handleYjsDocChange}
-                    onInsertDrawing={handleInsertDrawingFromSlashMenu}
-                    onEditDrawing={(blockId, drawingId, sceneUrl, title) => {
-                      void openExistingDrawingByUrl(sceneUrl, { blockId, drawingId, title })
-                    }}
-                    onDeleteDrawing={(blockId, drawingId, _sceneUrl, title) => {
-                      setConfirmDeleteDrawing({ blockId, drawingId, title })
-                    }}
-                    onDownloadDrawingPreview={handleDownloadDrawingPreview}
-                    onRenameDrawing={handleRenameDrawing}
-                  />
+                  {selectedEditorReady && yjsSync.doc ? (
+                    <BlockNoteComponent
+                      key={`editor-${selectedNoteId}-${yjsSync.documentGeneration}-${blockNoteKey}`}
+                      ref={blockNoteRef}
+                      initialContent={draftContent}
+                      attachments={draftAttachments}
+                      onChange={handleBlockNoteChange}
+                      disabled={editorContentDisabled}
+                      placeholder="请输入内容..."
+                      onAddAttachment={handleBlockNoteAddAttachment}
+                      onDropFiles={handleBlockNoteFiles}
+                      onPasteFiles={handleBlockNoteFiles}
+                      yjsDoc={yjsSync.doc}
+                      onYjsDocChange={handleYjsDocChange}
+                      onInsertDrawing={handleInsertDrawingFromSlashMenu}
+                      onEditDrawing={(blockId, drawingId, sceneUrl, title) => {
+                        void openExistingDrawingByUrl(sceneUrl, { blockId, drawingId, title })
+                      }}
+                      onDeleteDrawing={(blockId, drawingId, _sceneUrl, title) => {
+                        requestDeleteDrawing({ blockId, drawingId, title })
+                      }}
+                      onDownloadDrawingPreview={handleDownloadDrawingPreview}
+                      onRenameDrawing={handleRenameDrawing}
+                    />
+                  ) : null}
                 </div>
 
                 {/* 底部按钮已移到顶部工具栏 */}
@@ -1282,19 +1110,7 @@ export function VaultView() {
         title={drawingTitle}
         initialData={drawingInitialData}
         isSaving={drawingEditorSaving}
-        onOpenChange={(open) => {
-          setDrawingEditorOpen(open)
-          if (!open) {
-            if (pendingDrawingInsertRef.current) {
-              pendingDrawingInsertRef.current(null)
-              pendingDrawingInsertRef.current = null
-            }
-            setActiveDrawingBlockId(null)
-            setDrawingTitle('')
-            setDrawingInitialData(null)
-            setDrawingEditorSaving(false)
-          }
-        }}
+        onOpenChange={handleDrawingEditorOpenChange}
         onTitleChange={setDrawingTitle}
         onSave={handleSaveDrawing}
       />
@@ -1305,12 +1121,8 @@ export function VaultView() {
           message={`将删除绘图卡片「${confirmDeleteDrawing.title}」以及对应的源文件和 PNG 预览。此操作不可撤销。`}
           confirmText="删除绘图"
           confirmVariant="danger"
-          onCancel={() => setConfirmDeleteDrawing(null)}
-          onConfirm={() => {
-            const ctx = confirmDeleteDrawing
-            setConfirmDeleteDrawing(null)
-            handleDeleteDrawing(ctx.blockId, ctx.drawingId)
-          }}
+          onCancel={cancelDeleteDrawing}
+          onConfirm={confirmDrawingDeletion}
         />
       ) : null}
 

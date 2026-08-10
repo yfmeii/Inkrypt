@@ -63,6 +63,19 @@ export function mergeYDocs(localDoc: Y.Doc, remoteDoc: Y.Doc): void {
 }
 
 /**
+ * Returns true when candidateDoc contains CRDT updates that baselineDoc does
+ * not know about. This is used to distinguish a locally restored working
+ * document from a fully acknowledged server baseline.
+ */
+export function hasYDocUpdatesBeyond(candidateDoc: Y.Doc, baselineDoc: Y.Doc): boolean {
+  const candidateUpdate = Y.encodeStateAsUpdate(candidateDoc)
+  const baselineStateVector = Y.encodeStateVector(baselineDoc)
+  const difference = Y.diffUpdate(candidateUpdate, baselineStateVector)
+  const emptyUpdate = Y.encodeStateAsUpdate(new Y.Doc())
+  return !bytesEqual(difference, emptyUpdate)
+}
+
+/**
  * 比较两个 Y.Doc 是否等价
  */
 export function areYDocsEqual(doc1: Y.Doc, doc2: Y.Doc): boolean {

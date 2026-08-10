@@ -3,7 +3,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { postJSON, getJSON, deleteJSON, ApiError } from './api'
+import { INKRYPT_API_VERSION } from '@inkrypt/contracts/version'
+import { postJSON, getJSON, deleteJSON, ApiError, ApiProtocolError } from './api'
 
 describe('api - ApiError', () => {
   it('creates error with message, status and payload', () => {
@@ -149,6 +150,75 @@ describe('api - getJSON', () => {
   })
 })
 
+describe('api - runtime protocol contracts', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('rejects a successful response without an API version header', async () => {
+    ;(fetch as any).mockResolvedValue({
+      ok: true,
+      headers: new Headers(),
+      json: vi.fn().mockResolvedValue({ ok: true }),
+    })
+
+    await expect(getJSON('/api/test')).rejects.toMatchObject({
+      code: 'MISSING_API_VERSION',
+    })
+  })
+
+  it('rejects an incompatible API version', async () => {
+    ;(fetch as any).mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'X-Inkrypt-API-Version': '999' }),
+      json: vi.fn().mockResolvedValue({ ok: true }),
+    })
+
+    await expect(getJSON('/api/test')).rejects.toMatchObject({
+      code: 'API_VERSION_MISMATCH',
+      payload: { expected: INKRYPT_API_VERSION, actual: '999' },
+    })
+  })
+
+  it('parses successful responses through the supplied runtime schema', async () => {
+    ;(fetch as any).mockResolvedValue({
+      ok: true,
+      headers: new Headers({
+        'X-Inkrypt-API-Version': String(INKRYPT_API_VERSION),
+      }),
+      json: vi.fn().mockResolvedValue({ value: 42 }),
+    })
+    const schema = {
+      safeParse: vi.fn(() => ({ success: true as const, data: { value: 42 } })),
+    }
+
+    await expect(getJSON('/api/test', schema)).resolves.toEqual({ value: 42 })
+    expect(schema.safeParse).toHaveBeenCalledWith({ value: 42 })
+  })
+
+  it('raises a protocol error for a malformed successful response', async () => {
+    ;(fetch as any).mockResolvedValue({
+      ok: true,
+      headers: new Headers({
+        'X-Inkrypt-API-Version': String(INKRYPT_API_VERSION),
+      }),
+      json: vi.fn().mockResolvedValue({ value: 'invalid' }),
+    })
+    const schema = {
+      safeParse: vi.fn(() => ({
+        success: false as const,
+        error: { issues: [{ path: ['value'], message: 'Expected number' }] },
+      })),
+    }
+
+    await expect(getJSON('/api/test', schema)).rejects.toBeInstanceOf(ApiProtocolError)
+  })
+})
+
 describe('api - deleteJSON', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
@@ -274,7 +344,7 @@ describe('api - device revoked event', () => {
     expect(dispatchEventSpy).not.toHaveBeenCalled()
   })
 
-  it('does not dispatch event for 401 without DEVICE_REVOKED code', async () => {
+  it('dispatches session-expired for an ordinary unauthorized response', async () => {
     ;(fetch as any).mockResolvedValue({
       ok: false,
       status: 401,
@@ -287,7 +357,8 @@ describe('api - device revoked event', () => {
       // expected
     }
 
-    expect(dispatchEventSpy).not.toHaveBeenCalled()
+    expect(dispatchEventSpy).toHaveBeenCalledTimes(1)
+    expect(dispatchEventSpy.mock.calls[0][0].type).toBe('inkrypt:session-expired')
   })
 
   it('does not dispatch event when error field is not string', async () => {

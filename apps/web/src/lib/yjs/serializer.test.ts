@@ -1,7 +1,13 @@
 import { describe, test, expect } from 'vitest'
 import * as fc from 'fast-check'
 import * as Y from 'yjs'
-import { encodeYDoc, decodeYDoc, mergeYDocs, areYDocsEqual } from './serializer'
+import {
+  encodeYDoc,
+  decodeYDoc,
+  mergeYDocs,
+  areYDocsEqual,
+  hasYDocUpdatesBeyond,
+} from './serializer'
 
 /**
  * 生成随机的 Y.Doc 用于属性测试
@@ -36,6 +42,17 @@ const yDocArbitrary = fc
   })
 
 describe('YjsSerializer', () => {
+  test('detects local updates that are absent from the server baseline', () => {
+    const baseline = new Y.Doc()
+    baseline.getText('content').insert(0, 'base')
+
+    const local = decodeYDoc(encodeYDoc(baseline))
+    expect(hasYDocUpdatesBeyond(local, baseline)).toBe(false)
+
+    local.getText('content').insert(local.getText('content').length, ' local edit')
+    expect(hasYDocUpdatesBeyond(local, baseline)).toBe(true)
+  })
+
   describe('Property 1: Serialization Round-Trip', () => {
     /**
      * Feature: yjs-crdt-sync, Property 1: Serialization Round-Trip

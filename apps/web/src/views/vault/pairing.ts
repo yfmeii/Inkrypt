@@ -1,4 +1,10 @@
 import { useState } from 'react'
+import { okResponseSchema } from '@inkrypt/contracts/auth'
+import {
+  aliceHandshakeStatusResponseSchema,
+  handshakeInitResponseSchema,
+  handshakeMutationResponseSchema,
+} from '@inkrypt/contracts/handshake'
 import type { Bytes } from '../../lib/crypto'
 import { postJSON } from '../../lib/api'
 import { formatErrorZh } from '../../lib/errors'
@@ -37,9 +43,10 @@ export function useVaultPairing(masterKey: Bytes | null) {
       setKeyPair(keyPair)
       const publicKey = await exportPublicKeyJwk(keyPair.publicKey)
 
-      const resp = await postJSON<{ sessionCode: string; sessionSecret: string; expiresAt: number }>(
+      const resp = await postJSON(
         '/api/handshake/init',
         { publicKey },
+        handshakeInitResponseSchema,
       )
 
       void navigator.clipboard.writeText(resp.sessionSecret).catch(() => null)
@@ -59,11 +66,11 @@ export function useVaultPairing(masterKey: Bytes | null) {
         runId,
         isCurrentRun,
         poll: () =>
-          postJSON<{
-          status: 'waiting_join' | 'waiting_confirm' | 'finished'
-          expiresAt: number
-          bobPublicKey: JsonWebKey | null
-        }>('/api/handshake/status/alice', { sessionCode: resp.sessionCode, sessionSecret: resp.sessionSecret }),
+          postJSON(
+            '/api/handshake/status/alice',
+            { sessionCode: resp.sessionCode, sessionSecret: resp.sessionSecret },
+            aliceHandshakeStatusResponseSchema,
+          ),
         onStatus: async (status) => {
           setPairing((prev) => (prev ? { ...prev, expiresAt: status.expiresAt } : prev))
 
@@ -98,7 +105,11 @@ export function useVaultPairing(masterKey: Bytes | null) {
     cancelRun()
     setPairing(null)
     if (code && secret) {
-      void postJSON('/api/handshake/cancel', { sessionCode: code, sessionSecret: secret }).catch(() => null)
+      void postJSON(
+        '/api/handshake/cancel',
+        { sessionCode: code, sessionSecret: secret },
+        okResponseSchema,
+      ).catch(() => null)
     }
   }
 
@@ -113,7 +124,7 @@ export function useVaultPairing(masterKey: Bytes | null) {
         sessionSecret: pairing.sessionSecret,
         encryptedPayload,
         iv,
-      })
+      }, handshakeMutationResponseSchema)
       setPairing((prev) => (prev ? { ...prev, stage: 'sent' } : prev))
     } catch (err) {
       setPairingError(formatErrorZh(err))
