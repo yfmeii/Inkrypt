@@ -18,7 +18,7 @@ on:
         default: 'Lax'
         type: string
       cors_origin:
-        description: 'CORS_ORIGIN (default: https://<DOMAIN>, comma-separated allowed)'
+        description: 'Deprecated: CORS is fixed to https://<DOMAIN>'
         required: false
         default: ''
         type: string
@@ -89,13 +89,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: pnpm
 
       - name: Install deps
-        run: npm ci
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify source
+        run: pnpm run ci
 
       - name: Resolve deploy config
         id: cfg
@@ -113,19 +122,7 @@ jobs:
       - name: Ensure Pages project exists
         run: node deploy/cf-api.mjs ensure-pages-project --account-id "${{ steps.zone.outputs.account_id }}" --project-name "${{ steps.cfg.outputs.pages_project_name }}" --production-branch main
 
-      - name: Build web
-        run: npm --workspace apps/web run build
-
-      - name: Deploy Pages (Direct Upload)
-        uses: cloudflare/pages-action@v1
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ steps.zone.outputs.account_id }}
-          projectName: ${{ steps.cfg.outputs.pages_project_name }}
-          directory: apps/web/dist
-          branch: main
-
-      - name: Bind custom domain + DNS (Pages)
+      - name: Prepare custom domain and DNS
         run: node deploy/cf-api.mjs ensure-pages-domain --domain "${{ steps.cfg.outputs.domain }}" --account-id "${{ steps.zone.outputs.account_id }}" --project-name "${{ steps.cfg.outputs.pages_project_name }}" --zone-id "${{ steps.zone.outputs.zone_id }}" --cname-target "${{ steps.cfg.outputs.cname_target }}"
 
       - name: Ensure D1 exists
@@ -136,18 +133,18 @@ jobs:
           name="${{ steps.cfg.outputs.d1_name }}"
 
           echo "Looking up D1 database: $name"
-          db_json="$(npx wrangler d1 list --json)"
+          db_json="$(pnpm --dir apps/worker exec wrangler d1 list --json)"
           db_id="$(node -e 'const fs=require("fs"); const name=process.argv[1]; const raw=JSON.parse(fs.readFileSync(0,"utf8")); const list=Array.isArray(raw)?raw:(Array.isArray(raw?.result)?raw.result:[]); const hit=list.find(d=>d && d.name===name); const id=hit?.uuid ?? hit?.database_id ?? hit?.id ?? hit?.databaseId; if(id) process.stdout.write(String(id));' "$name" <<<"$db_json")"
 
           if [ -z "${db_id}" ]; then
             echo "Creating D1 database: $name"
             if [ -n "${{ inputs.d1_location }}" ]; then
-              npx wrangler d1 create "$name" --location "${{ inputs.d1_location }}"
+              pnpm --dir apps/worker exec wrangler d1 create "$name" --location "${{ inputs.d1_location }}"
             else
-              npx wrangler d1 create "$name"
+              pnpm --dir apps/worker exec wrangler d1 create "$name"
             fi
 
-            db_json="$(npx wrangler d1 list --json)"
+            db_json="$(pnpm --dir apps/worker exec wrangler d1 list --json)"
             db_id="$(node -e 'const fs=require("fs"); const name=process.argv[1]; const raw=JSON.parse(fs.readFileSync(0,"utf8")); const list=Array.isArray(raw)?raw:(Array.isArray(raw?.result)?raw.result:[]); const hit=list.find(d=>d && d.name===name); const id=hit?.uuid ?? hit?.database_id ?? hit?.id ?? hit?.databaseId; if(id) process.stdout.write(String(id));' "$name" <<<"$db_json")"
           fi
 
@@ -169,39 +166,42 @@ jobs:
             --rp-name "${{ steps.cfg.outputs.rp_name }}" \
             --rp-id "${{ steps.cfg.outputs.rp_id }}" \
             --origin "${{ steps.cfg.outputs.origin }}" \
-            --cors-origin "${{ steps.cfg.outputs.cors_origin }}" \
-            --cookie-samesite "${{ steps.cfg.outputs.cookie_samesite }}"
+            --cors-origin "${{ steps.cfg.outputs.origin }}" \
+            --cookie-samesite "${{ steps.cfg.outputs.cookie_samesite }}" \
+            --release-sha "${{ github.sha }}"
 
       - name: Apply D1 migrations
-        run: npx wrangler d1 migrations apply "${{ steps.cfg.outputs.d1_name }}" --remote --cwd apps/worker --config wrangler.toml
+        run: pnpm --dir apps/worker exec wrangler d1 migrations apply "${{ steps.cfg.outputs.d1_name }}" --remote --config wrangler.toml
 
-      - name: Resolve SESSION_SECRET
+      - name: Validate Worker secrets
         shell: bash
         run: |
           set -euo pipefail
-          if [ -n "${{ secrets.INKRYPT_SESSION_SECRET }}" ]; then
-            secret="${{ secrets.INKRYPT_SESSION_SECRET }}"
-          else
-            secret="$(node -e 'console.log(require("crypto").randomBytes(48).toString("base64"))')"
-          fi
-          echo "::add-mask::$secret"
-          echo "SESSION_SECRET=$secret" >> "$GITHUB_ENV"
+          test -n "${{ secrets.INKRYPT_SESSION_SECRET }}" || { echo "INKRYPT_SESSION_SECRET is required" >&2; exit 1; }
+          test -n "${{ secrets.INKRYPT_SETUP_TOKEN }}" || { echo "INKRYPT_SETUP_TOKEN is required" >&2; exit 1; }
 
-      - name: Put Worker secret
+      - name: Put Worker secrets
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s' "$SESSION_SECRET" | npx wrangler secret put SESSION_SECRET --name "${{ steps.cfg.outputs.worker_name }}" --cwd apps/worker --config wrangler.toml
+          printf '%s' "${{ secrets.INKRYPT_SESSION_SECRET }}" | pnpm --dir apps/worker exec wrangler secret put SESSION_SECRET --name "${{ steps.cfg.outputs.worker_name }}" --config wrangler.toml
+          printf '%s' "${{ secrets.INKRYPT_SETUP_TOKEN }}" | pnpm --dir apps/worker exec wrangler secret put SETUP_TOKEN --name "${{ steps.cfg.outputs.worker_name }}" --config wrangler.toml
 
       - name: Deploy Worker
-        run: npx wrangler deploy --name "${{ steps.cfg.outputs.worker_name }}" --cwd apps/worker --config wrangler.toml
+        run: pnpm --dir apps/worker exec wrangler deploy --name "${{ steps.cfg.outputs.worker_name }}" --config wrangler.toml
 
       - name: Ensure Worker routes
         run: node deploy/cf-api.mjs ensure-worker-routes --zone-id "${{ steps.zone.outputs.zone_id }}" --worker-name "${{ steps.cfg.outputs.worker_name }}" --route "${{ steps.cfg.outputs.domain }}/api/*,${{ steps.cfg.outputs.domain }}/auth/*,${{ steps.cfg.outputs.domain }}/healthz*"
 
-      - name: Smoke test
+      - name: Verify Worker health
         shell: bash
         run: |
           set -euo pipefail
-          echo "Checking https://${{ steps.cfg.outputs.domain }}/healthz"
-          curl -fsS "https://${{ steps.cfg.outputs.domain }}/healthz" >/dev/null
+          curl --fail --retry 30 --retry-delay 5 --retry-all-errors "https://${{ steps.cfg.outputs.domain }}/healthz" >/dev/null
+          curl --fail --retry 30 --retry-delay 5 --retry-all-errors "https://${{ steps.cfg.outputs.domain }}/healthz/deep" | node -e 'let raw=""; process.stdin.on("data", chunk => raw += chunk); process.stdin.on("end", () => { const body=JSON.parse(raw); if(body.status!=="ok") process.exit(1) })'
+
+      - name: Deploy Pages
+        run: pnpm --dir apps/worker exec wrangler pages deploy ../web/dist --project-name "${{ steps.cfg.outputs.pages_project_name }}" --branch main
+
+      - name: Verify deployed site
+        run: curl --fail --retry 30 --retry-delay 5 --retry-all-errors "https://${{ steps.cfg.outputs.domain }}/" >/dev/null

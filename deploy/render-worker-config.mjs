@@ -65,6 +65,7 @@ const rpId = required('rp-id', args['rp-id'] ?? process.env.INKRYPT_RP_ID ?? pro
 const origin = required('origin', args.origin ?? process.env.INKRYPT_ORIGIN ?? (rpId ? `https://${rpId}` : ''))
 const corsOrigin = required('cors-origin', args['cors-origin'] ?? process.env.INKRYPT_CORS_ORIGIN ?? origin)
 const cookieSameSite = required('cookie-samesite', args['cookie-samesite'] ?? process.env.INKRYPT_COOKIE_SAMESITE ?? 'Lax')
+const releaseSha = required('release-sha', args['release-sha'] ?? process.env.GITHUB_SHA ?? 'development')
 
 const d1Name = required('d1-name', args['d1-name'] ?? process.env.INKRYPT_D1_NAME)
 const d1Id = required('d1-id', args['d1-id'] ?? process.env.INKRYPT_D1_ID)
@@ -79,10 +80,13 @@ content = replaceLine(content, 'RP_ID', rpId)
 content = replaceLine(content, 'ORIGIN', origin)
 content = replaceLine(content, 'CORS_ORIGIN', corsOrigin)
 content = replaceLine(content, 'COOKIE_SAMESITE', cookieSameSite)
+content = replaceLine(content, 'ENVIRONMENT', 'production')
+content = replaceLine(content, 'TENANCY_MODE', 'single')
+content = replaceLine(content, 'VAULT_USERNAME', 'vault')
+content = replaceLine(content, 'RELEASE_SHA', releaseSha)
 
 content = replaceLine(content, 'database_name', d1Name)
 content = replaceLine(content, 'database_id', d1Id)
 
 fs.writeFileSync(outPath, content)
 process.stdout.write(`Wrote ${outPath}\n`)
-

@@ -12,6 +12,10 @@ RP_ID = "notes.example.com"
 ORIGIN = "https://notes.example.com"
 CORS_ORIGIN = "https://notes.example.com"
 COOKIE_SAMESITE = "Lax"
+ENVIRONMENT = "development"
+TENANCY_MODE = "single"
+VAULT_USERNAME = "vault"
+RELEASE_SHA = "development"
 
 [[d1_databases]]
 binding = "DB"

@@ -141,6 +141,8 @@
 
 - `DOMAIN`：你的自定义域名（例如 `notes.example.com`，必须已托管到 Cloudflare）
 - GitHub 仓库 Secret：`CLOUDFLARE_API_TOKEN`
+- GitHub 仓库 Secret：`INKRYPT_SESSION_SECRET`（固定的 32+ 字节高熵值）
+- GitHub 仓库 Secret：`INKRYPT_SETUP_TOKEN`（首次创建保险库时输入）
 
 ### 1) 创建你的仓库
 
@@ -151,7 +153,8 @@
 进入仓库 → Settings → Secrets and variables → Actions：
 
 - 新增 Repository secret：`CLOUDFLARE_API_TOKEN`
-- （可选）新增 Repository secret：`INKRYPT_SESSION_SECRET`（不填会自动生成）
+- 新增 Repository secret：`INKRYPT_SESSION_SECRET`（必填；后续部署必须保持稳定）
+- 新增 Repository secret：`INKRYPT_SETUP_TOKEN`（必填；建议 16+ 字符）
 
 Token 最小权限建议：
 
@@ -173,12 +176,13 @@ Token 最小权限建议：
 
 该工作流会自动完成：
 
-- Pages 项目创建与部署（Direct Upload）
-- Worker 部署（含 D1/DO）
+- pnpm frozen-lockfile、类型检查、测试与构建门禁
 - D1 创建与 migrations
+- Worker 部署（含 D1/DO）与深度健康检查
+- Pages 项目创建与 Wrangler Direct Upload
 - Pages 自定义域名绑定 + DNS CNAME 自动配置
 - Worker Routes 自动配置（`/api/*`、`/auth/*`、`/healthz*`）
-- Smoke test：访问 `https://<DOMAIN>/healthz`
+- Smoke test：访问 `/healthz` 与 `/healthz/deep`
 
 ### 4) 部署完成后
 
@@ -194,7 +198,7 @@ Token 最小权限建议：
 
 首次使用流程：
 
-1. **创建保险库** — 完成 Passkey 注册，生成主密钥
+1. **创建保险库** — 输入 `INKRYPT_SETUP_TOKEN`，完成 Passkey 注册并生成主密钥
 2. **备份恢复码** — 这是你数据的最后保险，务必离线保管
 3. **开始写作** — 富文本编辑器，支持 Markdown 快捷输入
 4. **同步与上传** — `Ctrl/Cmd + S` 上传，自动实时同步

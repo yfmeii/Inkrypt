@@ -45,7 +45,8 @@ https://notes.example.com/auth/*  → Worker（认证）
 - 开通 Workers、Pages、D1、Durable Objects
 
 **本地**：
-- Node.js 20+
+- Node.js 22
+- pnpm 10.27
 - Git
 
 ---
@@ -65,7 +66,8 @@ https://notes.example.com/auth/*  → Worker（认证）
 
 - `DOMAIN`：例如 `notes.example.com`（必须在 Cloudflare 托管的 Zone 内）
 - GitHub 仓库 Secret：`CLOUDFLARE_API_TOKEN`
-- （可选）GitHub 仓库 Secret：`INKRYPT_SESSION_SECRET`（不填则自动生成）
+- GitHub 仓库 Secret：`INKRYPT_SESSION_SECRET`（必填，32+ 字节且长期保持稳定）
+- GitHub 仓库 Secret：`INKRYPT_SETUP_TOKEN`（必填，首次创建保险库时使用）
 
 ### Token 权限建议（最小集）
 
@@ -82,7 +84,8 @@ https://notes.example.com/auth/*  → Worker（认证）
 1. 在 GitHub 点击 **Use this template** 创建你的仓库
 2. 进入仓库 → Settings → Secrets and variables → Actions：
    - 新增 Repository secret：`CLOUDFLARE_API_TOKEN`
-   - （可选）新增 Repository secret：`INKRYPT_SESSION_SECRET`
+   - 新增 Repository secret：`INKRYPT_SESSION_SECRET`
+   - 新增 Repository secret：`INKRYPT_SETUP_TOKEN`
 3. 进入仓库 → Actions → `Deploy Inkrypt` → Run workflow：
    - 填写必填项：`domain`
    - 其余选填（默认即可）
@@ -100,8 +103,9 @@ https://notes.example.com/auth/*  → Worker（认证）
 ```bash
 git clone https://github.com/YourRepo/Inkrypt.git
 cd Inkrypt
-npm install
-npx wrangler login  # 登录 Cloudflare
+corepack enable
+pnpm install --frozen-lockfile
+pnpm --filter @inkrypt/worker exec wrangler login
 ```
 
 ---
@@ -116,6 +120,9 @@ RP_ID = "notes.example.com"           # 你的域名，不带 https://
 ORIGIN = "https://notes.example.com"  # 完整地址，不带路径
 CORS_ORIGIN = "https://notes.example.com"
 COOKIE_SAMESITE = "Lax"
+ENVIRONMENT = "production"
+TENANCY_MODE = "single"
+VAULT_USERNAME = "vault"
 ```
 
 ---
@@ -126,12 +133,25 @@ COOKIE_SAMESITE = "Lax"
 cd apps/worker
 
 # 创建 D1 数据库
-npx wrangler d1 create inkrypt
+pnpm exec wrangler d1 create inkrypt
 # 把输出的 database_id 填入 wrangler.toml
 
 # 执行迁移
-npx wrangler d1 migrations apply inkrypt --remote
+pnpm exec wrangler d1 migrations apply inkrypt --remote
 ```
+
+### 从旧版本升级到协议 v2
+
+`0007_remove_legacy_protocols.sql` 会删除旧的时间戳同步、明文 enrollment token、全局 challenge 和服务端冲突副本。迁移在 `note_conflicts` 仍有记录时会主动失败，避免静默丢弃历史密文。
+
+升级前先检查：
+
+```bash
+pnpm exec wrangler d1 execute inkrypt --remote \
+  --command "SELECT COUNT(*) AS unresolved_conflicts FROM note_conflicts"
+```
+
+如果结果大于 `0`，先使用旧版本客户端完成合并，或安全导出这些密文记录；清空历史冲突后再执行迁移。新协议由 Yjs 在客户端合并，并通过单笔 CAS API 返回当前权威版本，不再保存独立冲突副本。
 
 ---
 
@@ -140,15 +160,18 @@ npx wrangler d1 migrations apply inkrypt --remote
 ```bash
 cd apps/worker
 
-# 部署 Worker
-npx wrangler deploy
-
 # 设置会话密钥（必须，至少 32 字节）
-npx wrangler secret put SESSION_SECRET
-# 输入一个强随机字符串
+pnpm exec wrangler secret put SESSION_SECRET
+# 输入一个固定的强随机字符串；后续部署不要自动重新生成
 
-# 再部署一次确保生效
-npx wrangler deploy
+# 设置首次初始化口令（必须，建议 16+ 字符）
+pnpm exec wrangler secret put SETUP_TOKEN
+
+# 部署 Worker
+pnpm exec wrangler deploy
+
+# 只有深度健康检查通过后再发布前端
+curl --fail https://notes.example.com/healthz/deep
 ```
 
 ---
@@ -158,7 +181,7 @@ npx wrangler deploy
 1. 打开 Cloudflare Dashboard → Pages → 创建项目
 2. 绑定你的 Git 仓库
 3. 配置构建：
-   - **Build command**: `npm ci && npm --workspace apps/web run build`
+   - **Build command**: `pnpm install --frozen-lockfile && pnpm --filter @inkrypt/web run build`
    - **Output directory**: `apps/web/dist`
    - **Environment**: `NODE_VERSION=22`
 
@@ -183,7 +206,7 @@ Worker → Triggers → Routes → 添加：
 ## 验证部署
 
 1. 访问 `https://notes.example.com`
-2. 创建保险库，完成 Passkey 注册
+2. 选择“创建保险库”，输入 `SETUP_TOKEN`，完成 Passkey 注册
 3. 退出后重新解锁
 4. 新建笔记并上传
 5. 从云端同步，确认数据正常
@@ -201,14 +224,18 @@ ORIGIN="http://localhost:5173"
 CORS_ORIGIN="http://localhost:5173"
 COOKIE_SAMESITE="Lax"
 SESSION_SECRET="your-32-byte-random-secret-here"
+SETUP_TOKEN="your-one-time-setup-token"
+ENVIRONMENT="development"
+TENANCY_MODE="single"
+VAULT_USERNAME="vault"
 
 # 初始化本地数据库
 cd apps/worker
-npx wrangler d1 migrations apply inkrypt --local
+pnpm exec wrangler d1 migrations apply DB --local
 
 # 启动开发服务器
 cd ../..
-npm run dev
+pnpm run dev
 ```
 
 Vite 会自动代理 `/api` 和 `/auth` 到 Worker。
@@ -219,7 +246,7 @@ Vite 会自动代理 `/api` 和 `/auth` 到 Worker。
 
 ### MISCONFIGURED (500)
 
-`SESSION_SECRET` 没设置或太短。用 `npx wrangler secret put SESSION_SECRET` 设置后重新部署。
+检查 `SESSION_SECRET`、`SETUP_TOKEN`、`RP_ID`、`ORIGIN`、`CORS_ORIGIN` 和单租户配置。生产环境要求同源 HTTPS，且两个 secret 都必须存在。
 
 ### VERIFY_FAILED / NOT_VERIFIED
 
@@ -250,7 +277,7 @@ Vite 会自动代理 `/api` 和 `/auth` 到 Worker。
 | 建议 | 说明 |
 |------|------|
 | SESSION_SECRET 用 secret 存储 | 不要写在 wrangler.toml 里 |
-| 定期轮换 SESSION_SECRET | 会让现有会话失效，但不影响数据 |
+| SESSION_SECRET 保持稳定 | 轮换会立即让所有 API 会话失效；只在明确撤销全部会话时轮换 |
 | 严格 CSP | 保持 `script-src 'self'`，`connect-src` 只放行必要 origin |
 | 同域部署 | 减少跨域和 Cookie 风险 |
 | 了解恢复码的重要性 | 丢了就真没了 |
