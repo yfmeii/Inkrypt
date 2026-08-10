@@ -1,9 +1,9 @@
 import type { D1Database } from '../cloudflare'
 import {
-  createNote,
-  createNoteConflict,
-  getNoteVersion,
-  updateNoteVersion,
+  saveNoteRecord,
+  saveNoteRecords,
+  type PersistedNoteRecord,
+  type SaveNoteRecordInput,
 } from '../repositories/notes'
 
 export type SaveNoteInput = {
@@ -14,86 +14,59 @@ export type SaveNoteInput = {
   is_deleted?: boolean
 }
 
-export type SaveNotesResult = {
-  saved: Array<{ id: string; version: number; updated_at: number }>
-  conflicts: string[]
+export type SaveNoteOutcome =
+  | { status: 'saved'; note: PersistedNoteRecord }
+  | { status: 'conflict'; current: PersistedNoteRecord | null }
+
+function toSaveRecordInput(
+  userId: string,
+  note: SaveNoteInput,
+  updatedAt: number,
+): SaveNoteRecordInput {
+  return {
+    id: note.id,
+    userId,
+    baseVersion: note.base_version,
+    updatedAt,
+    isDeleted: note.is_deleted ?? false,
+    encryptedData: note.encrypted_data,
+    iv: note.iv,
+  }
 }
 
-type SaveNotesOptions = {
+export async function saveNote(options: {
   db: D1Database
   userId: string
-  deviceName: string | null
-  notes: SaveNoteInput[]
+  note: SaveNoteInput
   now?: () => number
-  createConflictId?: () => string
+}): Promise<SaveNoteOutcome> {
+  const updatedAt = (options.now ?? Date.now)()
+  const result = await saveNoteRecord(
+    options.db,
+    toSaveRecordInput(options.userId, options.note, updatedAt),
+  )
+
+  if (result.saved && result.current) {
+    return { status: 'saved', note: result.current }
+  }
+  return { status: 'conflict', current: result.current }
 }
 
-export async function saveNotes(options: SaveNotesOptions): Promise<SaveNotesResult> {
+export async function saveNoteBatch(options: {
+  db: D1Database
+  userId: string
+  notes: SaveNoteInput[]
+  now?: () => number
+}): Promise<Array<{ id: string; outcome: SaveNoteOutcome }>> {
   const now = options.now ?? Date.now
-  const createConflictId = options.createConflictId ?? crypto.randomUUID
-  const saved: SaveNotesResult['saved'] = []
-  const conflicts: string[] = []
+  const inputs = options.notes.map((note) => toSaveRecordInput(options.userId, note, now()))
+  const results = await saveNoteRecords(options.db, inputs)
 
-  for (const note of options.notes) {
-    const ts = now()
-    const existingVersion = await getNoteVersion(options.db, note.id, options.userId)
-
-    if (existingVersion === null) {
-      await createNote(options.db, {
-        id: note.id,
-        userId: options.userId,
-        updatedAt: ts,
-        isDeleted: note.is_deleted ?? false,
-        encryptedData: note.encrypted_data,
-        iv: note.iv,
-      })
-
-      saved.push({ id: note.id, version: 1, updated_at: ts })
-      continue
-    }
-
-    if (existingVersion !== note.base_version) {
-      await createNoteConflict(options.db, {
-        id: createConflictId(),
-        noteId: note.id,
-        userId: options.userId,
-        encryptedData: note.encrypted_data,
-        iv: note.iv,
-        deviceName: options.deviceName,
-        createdAt: ts,
-      })
-      conflicts.push(note.id)
-      continue
-    }
-
-    const newVersion = existingVersion + 1
-    const updated = await updateNoteVersion(options.db, {
-      id: note.id,
-      userId: options.userId,
-      currentVersion: existingVersion,
-      newVersion,
-      updatedAt: ts,
-      isDeleted: note.is_deleted ?? false,
-      encryptedData: note.encrypted_data,
-      iv: note.iv,
-    })
-
-    if (!updated) {
-      await createNoteConflict(options.db, {
-        id: createConflictId(),
-        noteId: note.id,
-        userId: options.userId,
-        encryptedData: note.encrypted_data,
-        iv: note.iv,
-        deviceName: options.deviceName,
-        createdAt: ts,
-      })
-      conflicts.push(note.id)
-      continue
-    }
-
-    saved.push({ id: note.id, version: newVersion, updated_at: ts })
-  }
-
-  return { saved, conflicts }
+  return options.notes.map((note, index) => {
+    const result = results[index]
+    const outcome: SaveNoteOutcome = result?.saved && result.current
+      ? { status: 'saved', note: result.current }
+      : { status: 'conflict', current: result?.current ?? null }
+    return { id: note.id, outcome }
+  })
 }
